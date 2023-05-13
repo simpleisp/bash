@@ -147,17 +147,20 @@ sed -i '/^\s*#\?\s*port =/s/^#//' "$sql_file"
 sed -i '/^\s*#\?\s*login =/s/^#//' "$sql_file"
 sed -i '/^\s*#\?\s*password =/s/^#//' "$sql_file"
 sed -i '/^\s*#\?\s*read_clients =/s/^#//' "$sql_file"
+
+#comment tls section
+sed -i '/tls {/,/}/ s/^/#/' "$sql_file"
 # # Replace files
-# sed -i 's/dialect = .*/dialect = "mysql"/' "$sql_file"
-# sed -i '0,/^driver/s/^#*\s*driver.*/driver = "rlm_sql_mysql"/' "$sql_file"
+sed -i 's/dialect = .*/dialect = "mysql"/' "$sql_file"
+awk 'BEGIN{change=1} change && /^[[:space:]]*driver/ {sub(/=.*/, "= \"rlm_sql_mysql\""); change=0} 1' "$sql_file" > temp && mv temp "$sql_file"
 sed -i "s/login = .*/login = \"$MYSQL_USER\"/" "$sql_file"
 sed -i "s/password = .*/password = \"$MYSQL_PASSWORD\"/" "$sql_file"
 sed -i "s/read_clients = .*/read_clients = yes/" "$sql_file"
 
 # # Enable SQL module and configure FreeRADIUS to use it
 sudo ln -s /etc/freeradius/3.0/mods-available/sql /etc/freeradius/3.0/mods-enabled/
-# sudo sed -i 's/-sql/sql/g' /etc/freeradius/3.0/sites-available/default
-# sudo sed -i '/^ *#.*sql/s/^ *#//' /etc/freeradius/3.0/sites-available/default
+sudo sed -i 's/-sql/sql/g' /etc/freeradius/3.0/sites-available/default
+sudo sed -i '/^ *#.*sql/s/^ *#//' /etc/freeradius/3.0/sites-available/default
 
 # # Restart FreeRADIUS service
 sudo systemctl restart freeradius
@@ -241,10 +244,10 @@ crontab cronjob
 # Clean up the temporary file
 rm cronjob
 
-# # Step 5: Prompt user for email address and install Certbot
-# read -p "Enter your email address for certificate management: " email_address
-# sudo apt install -y certbot python3-certbot-nginx
-# sudo certbot --nginx -d $domain_name --non-interactive --agree-tos --email $email_address
+# Step 5: Prompt user for email address and install Certbot
+read -p "Enter your email address for certificate management: " email_address
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d $domain_name --non-interactive --agree-tos --email $email_address
 
 
 echo "MariaDB setup completed"
