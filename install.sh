@@ -138,48 +138,26 @@ fi
 # Install FreeRADIUS and FreeRADIUS-MySQL
 sudo apt-get install -y freeradius freeradius-mysql freeradius-utils
 
+# # Specify the path to the FreeRADIUS SQL file
 sql_file="/etc/freeradius/3.0/mods-available/sql"
 
-# Configure FreeRADIUS to use MySQL
+# # Uncomment and replace the server, port, login, and password lines in the SQL file
+# sed -i '/^\s*#\?\s*server =/s/^#//' "$sql_file"
+# sed -i '/^\s*#\?\s*port =/s/^#//' "$sql_file"
+# sed -i '/^\s*#\?\s*login =/s/^#//' "$sql_file"
+# sed -i '/^\s*#\?\s*password =/s/^#//' "$sql_file"
+# sed -i '/^\s*#\?\s*read_clients =/s/^#//' "$sql_file"
+# # Replace files
+# sed -i 's/dialect = .*/dialect = "mysql"/' "$sql_file"
+# sed -i '0,/^driver/s/^#*\s*driver.*/driver = "rlm_sql_mysql"/' "$sql_file"
+sed -i "s/login = .*/login = \"$MYSQL_USER\"/" "$sql_file"
+sed -i "s/password = .*/password = \"$MYSQL_PASSWORD\"/" "$sql_file"
+# sed -i "s/read_clients = .*/read_clients = yes/" "$sql_file"
+
+# # Enable SQL module and configure FreeRADIUS to use it
 sudo ln -s /etc/freeradius/3.0/mods-available/sql /etc/freeradius/3.0/mods-enabled/
-# Update driver and dialect
-sudo sed -i 's/driver = "rlm_sql_null"/driver = "rlm_sql_mysql"/' "$sql_file"
-sudo sed -i 's/dialect = "sqlite"/dialect = "mysql"/' "$sql_file"
-
-# Configure FreeRADIUS to read clients
-sudo sed -i '/#\s*read_clients = yes/s/^#//' "$sql_file"
-
-sudo sed -i '/^\s*#\?\s*server =/s/^#//' "$sql_file"
-sudo sed -i '/^\s*#\?\s*port =/s/^#//' "$sql_file"
-sudo sed -i '/^\s*#\?\s*login =/s/^#//' "$sql_file"
-sudo sed -i '/^\s*#\?\s*password =/s/^#//' "$sql_file"
-
-# Configure SQL connection parameters
-sudo bash -c "cat > /etc/freeradius/3.0/mods-available/sql <<EOL
-sql {
-    # Connection info:
-    server = \"localhost\"
-    port = 3306
-    login = \"${MYSQL_USER}\"
-    password = \"${MYSQL_PASSWORD}\"
-
-    # Database table configuration for everything except Oracle
-    radius_db = \"radius\"
-}
-EOL"
-
-# Configuration file
-CONFIG_FILE="/etc/freeradius/3.0/sites-available/default"
-
-# Enable SQL in 'authorize', 'accounting', 'post-auth', and 'session'
-# Uncomment lines containing 'sql'
-sudo sed -i '/^ *#.*sql/s/^ *#//' $CONFIG_FILE
-sudo sed -i '/authorize {/,/}/{s/-sql/sql/}' $CONFIG_FILE
-sudo sed -i '/accounting {/,/}/{s/-sql/sql/}' $CONFIG_FILE
-sudo sed -i '/post-auth {/,/}/{s/-sql/sql/}' $CONFIG_FILE
-sudo sed -i '/session {/,/}/{s/-sql/sql/}' $CONFIG_FILE
-sudo sed -i '/^ *#.*sql/s/^ *#//' /etc/freeradius/3.0/sites-available/default
-
+# sudo sed -i 's/-sql/sql/g' /etc/freeradius/3.0/sites-available/default
+# sudo sed -i '/^ *#.*sql/s/^ *#//' /etc/freeradius/3.0/sites-available/default
 
 # # Restart FreeRADIUS service
 sudo systemctl restart freeradius
