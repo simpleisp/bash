@@ -241,10 +241,10 @@ crontab cronjob
 # Clean up the temporary file
 rm cronjob
 
-# # Step 5: Prompt user for email address and install Certbot
-# read -p "Enter your email address for certificate management: " email_address
-# sudo apt install -y certbot python3-certbot-nginx
-# sudo certbot --nginx -d $domain_name --non-interactive --agree-tos --email $email_address
+# Step 5: Prompt user for email address and install Certbot
+read -p "Enter your email address for certificate management: " email_address
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d $domain_name --non-interactive --agree-tos --email $email_address
 
 
 echo "MariaDB setup completed"
