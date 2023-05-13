@@ -159,8 +159,8 @@ sed -i "s/read_clients = .*/read_clients = yes/" "$sql_file"
 
 # # Enable SQL module and configure FreeRADIUS to use it
 sudo ln -s /etc/freeradius/3.0/mods-available/sql /etc/freeradius/3.0/mods-enabled/
-sudo sed -i 's/-sql/sql/g' /etc/freeradius/3.0/sites-available/default
-sudo sed -i '/^ *#.*sql/s/^ *#//' /etc/freeradius/3.0/sites-available/default
+# sudo sed -i 's/-sql/sql/g' /etc/freeradius/3.0/sites-available/default
+# sudo sed -i '/^ *#.*sql/s/^ *#//' /etc/freeradius/3.0/sites-available/default
 
 # # Restart FreeRADIUS service
 sudo systemctl restart freeradius
