@@ -76,11 +76,6 @@ sudo systemctl reload nginx
 # Finally, if you want to restart Nginx
 sudo systemctl restart nginx
 
-# Step 5: Prompt user for email address and install Certbot
-read -p "Enter your email address for certificate management: " email_address
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d $domain_name --non-interactive --agree-tos --email $email_address
-
 
 # Git clone laravel app
 
@@ -248,6 +243,19 @@ crontab cronjob
 
 # Clean up the temporary file
 rm cronjob
+
+# Step 5: Prompt user for email address and install Certbot
+read -p "Enter your email address for certificate management: " email_address
+
+# Install Certbot using Snap
+sudo snap install --classic certbot
+
+# Create a symbolic link to the Certbot executable in /usr/bin
+sudo ln -s /snap/bin/certbot /usr/bin/certbot
+
+# Run Certbot for the given domain
+sudo certbot --nginx -d $domain_name --agree-tos --email $email_address
+
 
 
 echo "MariaDB setup completed"
