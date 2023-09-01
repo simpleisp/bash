@@ -25,8 +25,6 @@ FLUSH PRIVILEGES;
 # sudo mysql -e "USE radius; SET GLOBAL time_zone = '+03:00'; SET time_zone = '+03:00';"
 sudo mysql -e "SET GLOBAL time_zone = '+03:00'; SET time_zone = '+03:00';"
 
-sudo apt-get install -y php-common php-gd php-curl php-mysql php-fpm php-zip php-mbstring php-xml
-
 # Nginx Installation
 
 # Step 1: Update the system
@@ -75,6 +73,8 @@ sudo systemctl reload nginx
 
 # Finally, if you want to restart Nginx
 sudo systemctl restart nginx
+
+sudo apt-get install -y php-common php-gd php-curl php-mysql php-fpm php-zip php-mbstring php-xml
 
 
 # Git clone laravel app
