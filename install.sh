@@ -217,9 +217,11 @@ www-data ALL=NOPASSWD: /usr/sbin/service freeradius status
 EOL"
 
 # Set permissions 
+sudo chown -R www-data:www-data /var/www
 sudo chown -R www-data:www-data /var/www/html
-sudo chmod -R 777 /var/www/html/storage
-sudo chmod -R 777 /var/www/html/bootstrap/cache
+sudo chmod -R 777 /var/www/html/storage 
+sudo chmod -R 777 /var/www/html/bootstrap/cache 
+sudo chown -R www-data:www-data /var/www/html/bootstrap/cache
 sudo timedatectl set-timezone Africa/Nairobi
 
 # Install cron
