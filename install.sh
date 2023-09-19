@@ -231,6 +231,7 @@ www-data ALL=NOPASSWD: /bin/supervisorctl update
 www-data ALL=NOPASSWD: /bin/supervisorctl start all
 www-data ALL=NOPASSWD: /bin/supervisorctl restart all
 www-data ALL=NOPASSWD: /bin/supervisorctl status
+www-data ALL=NOPASSWD: /bin/systemctl status ssh
 EOL"
 
 # Set permissions 
