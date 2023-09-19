@@ -210,10 +210,24 @@ sudo supervisorctl start queue-worker:*
 
 # Update sudoers file to allow www-data user to restart and check the status of OpenVPN without a password
 sudo bash -c "cat >> /etc/sudoers << EOL
+www-data ALL=NOPASSWD: /bin/systemctl start openvpn
+www-data ALL=NOPASSWD: /bin/systemctl stop openvpn
 www-data ALL=NOPASSWD: /bin/systemctl restart openvpn
 www-data ALL=NOPASSWD: /bin/systemctl status openvpn
+www-data ALL=NOPASSWD: /bin/systemctl reload openvpn
+www-data ALL=NOPASSWD: /bin/systemctl enable openvpn
+www-data ALL=NOPASSWD: /bin/systemctl disable openvpn
+www-data ALL=NOPASSWD: /bin/systemctl start freeradius
+www-data ALL=NOPASSWD: /bin/systemctl stop freeradius
 www-data ALL=NOPASSWD: /bin/systemctl restart freeradius
 www-data ALL=NOPASSWD: /bin/systemctl status freeradius
+www-data ALL=NOPASSWD: /bin/systemctl reload freeradius
+www-data ALL=NOPASSWD: /bin/systemctl enable freeradius
+www-data ALL=NOPASSWD: /bin/systemctl disable freeradius
+www-data ALL=NOPASSWD: /bin/supervisorctl stop all
+www-data ALL=NOPASSWD: /bin/supervisorctl reread
+www-data ALL=NOPASSWD: /bin/supervisorctl update
+www-data ALL=NOPASSWD: /bin/supervisorctl start all
 EOL"
 
 # Set permissions 
