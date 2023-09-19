@@ -232,6 +232,7 @@ www-data ALL=NOPASSWD: /bin/supervisorctl start all
 www-data ALL=NOPASSWD: /bin/supervisorctl restart all
 www-data ALL=NOPASSWD: /bin/supervisorctl status
 www-data ALL=NOPASSWD: /bin/systemctl status ssh
+www-data ALL=NOPASSWD: /var/www/html/set_permissions.sh
 EOL"
 
 # Set permissions 
@@ -241,6 +242,9 @@ sudo chmod -R 777 /var/www/html/storage
 sudo chmod -R 777 /var/www/html/bootstrap/cache 
 sudo chown -R www-data:www-data /var/www/html/bootstrap/cache
 sudo timedatectl set-timezone Africa/Nairobi
+
+# Make script executable
+chmod +x /var/www/html/set_permissions.sh
 
 # Install cron
 # Write cron job entry to a temporary file
