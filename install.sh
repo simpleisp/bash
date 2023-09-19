@@ -212,8 +212,8 @@ sudo supervisorctl start queue-worker:*
 sudo bash -c "cat >> /etc/sudoers << EOL
 www-data ALL=NOPASSWD: /bin/systemctl restart openvpn
 www-data ALL=NOPASSWD: /bin/systemctl status openvpn
-www-data ALL=NOPASSWD: /usr/sbin/service freeradius restart
-www-data ALL=NOPASSWD: /usr/sbin/service freeradius status
+www-data ALL=NOPASSWD: /bin/systemctl restart freeradius
+www-data ALL=NOPASSWD: /bin/systemctl status freeradius
 EOL"
 
 # Set permissions 
