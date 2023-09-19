@@ -229,6 +229,8 @@ www-data ALL=NOPASSWD: /bin/supervisorctl stop all
 www-data ALL=NOPASSWD: /bin/supervisorctl reread
 www-data ALL=NOPASSWD: /bin/supervisorctl update
 www-data ALL=NOPASSWD: /bin/supervisorctl start all
+www-data ALL=NOPASSWD: /bin/supervisorctl restart all
+www-data ALL=NOPASSWD: /bin/supervisorctl status
 EOL"
 
 # Set permissions 
