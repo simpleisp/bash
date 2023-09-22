@@ -245,7 +245,8 @@ sudo chown -R www-data:www-data /var/www/html/bootstrap/cache
 sudo timedatectl set-timezone Africa/Nairobi
 
 # Make script executable
-chmod +x /var/www/html/set_permissions.sh
+chmod +x /var/www/html/sh/set_permissions.sh
+chmod +x /var/www/html/sh/set_permissions.sh
 
 # Install cron
 # Write cron job entry to a temporary file
