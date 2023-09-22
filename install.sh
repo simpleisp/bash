@@ -246,7 +246,7 @@ sudo timedatectl set-timezone Africa/Nairobi
 
 # Make script executable
 chmod +x /var/www/html/sh/set_permissions.sh
-chmod +x /var/www/html/sh/set_permissions.sh
+chmod +x /var/www/html/sh/restart-services.sh
 
 # Install cron
 # Write cron job entry to a temporary file
