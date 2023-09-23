@@ -182,6 +182,9 @@ sudo chmod -R 777 /etc/openvpn
 sudo chmod -R 777 /etc/openvpn/easy-rsa
 sudo ufw allow 1194/tcp
 
+# Install Php imap
+apt install -y php-imap
+
 # Supervisor Installation
 
 # Step 1: Install Supervisor
