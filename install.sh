@@ -231,6 +231,7 @@ www-data ALL=NOPASSWD: /bin/supervisorctl update
 www-data ALL=NOPASSWD: /bin/supervisorctl start all
 www-data ALL=NOPASSWD: /bin/supervisorctl restart all
 www-data ALL=NOPASSWD: /bin/supervisorctl status
+www-data ALL=NOPASSWD: /bin/systemctl restart supervisor
 www-data ALL=NOPASSWD: /bin/systemctl status ssh
 www-data ALL=NOPASSWD: /var/www/html/sh/set_permissions.sh
 www-data ALL=NOPASSWD: /var/www/html/sh/restart-services.sh
