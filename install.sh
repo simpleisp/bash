@@ -151,8 +151,8 @@ sed -i "s/password = .*/password = \"$MYSQL_PASSWORD\"/" "$sql_file"
 sudo ln -s /etc/freeradius/3.0/mods-available/sql /etc/freeradius/3.0/mods-enabled/
 
 # # Enable & Restart FreeRADIUS service
-sudo systemctl enable freeradius
-sudo systemctl restart freeradius
+systemctl enable freeradius.service
+sudo systemctl restart freeradius.service
 
 # Install OpenVPN
 sudo apt-get update
