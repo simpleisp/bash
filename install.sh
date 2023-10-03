@@ -131,6 +131,7 @@ if [ ! -d "$LOCAL_PATH/public" ] || [ ! -f "$LOCAL_PATH/public/index.php" ]; the
 
     # # Optimize the application
     # php "$LOCAL_PATH"/artisan optimize
+
 else
     echo "The /var/www/html/public directory exists and contains index.php. Skipping clone and setup."
 fi
@@ -273,6 +274,10 @@ sudo ln -s /snap/bin/certbot /usr/bin/certbot
 
 # Run Certbot for the given domain
 sudo certbot --nginx -d $domain_name --agree-tos --email $email_address --no-eff-email --non-interactive
+
+# Install Composer dependencies
+    cd "$LOCAL_PATH"
+    composer install
 
 
 
