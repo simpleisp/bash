@@ -275,9 +275,9 @@ sudo ln -s /snap/bin/certbot /usr/bin/certbot
 # Run Certbot for the given domain
 sudo certbot --nginx -d $domain_name --agree-tos --email $email_address --no-eff-email --non-interactive
 
-# Install Composer dependencies
-    cd "$LOCAL_PATH"
-    composer install
+# Install Composer dependencies (initial setup)
+cd "$LOCAL_PATH"
+composer install
 
 
 
