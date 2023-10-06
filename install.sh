@@ -16,9 +16,9 @@ MYSQL_PASSWORD="$(openssl rand -base64 12)"
 # Login to MariaDB and setup
 sudo mysql -e "
 CREATE DATABASE radius;
-CREATE USER `${MYSQL_USER}`@'localhost' IDENTIFIED BY `${MYSQL_PASSWORD}`;
-GRANT ALL PRIVILEGES ON radius.* TO `${MYSQL_USER}`@'localhost';
-GRANT CREATE ROUTINE, ALTER ROUTINE ON radius.* TO `${MYSQL_USER}`@'localhost';
+CREATE USER '${MYSQL_USER}'@'localhost' IDENTIFIED BY '${MYSQL_PASSWORD}';
+GRANT ALL PRIVILEGES ON radius.* TO '${MYSQL_USER}'@'localhost';
+GRANT CREATE ROUTINE, ALTER ROUTINE ON radius.* TO '${MYSQL_USER}'@'localhost';
 FLUSH PRIVILEGES;
 "
 
