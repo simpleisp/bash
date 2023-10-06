@@ -18,6 +18,7 @@ sudo mysql -e "
 CREATE DATABASE radius;
 CREATE USER '${MYSQL_USER}'@'localhost' IDENTIFIED BY '${MYSQL_PASSWORD}';
 GRANT ALL PRIVILEGES ON radius.* TO '${MYSQL_USER}'@'localhost';
+GRANT CREATE ROUTINE ON `radius`.* TO '${MYSQL_USER}'@'localhost';
 FLUSH PRIVILEGES;
 "
 
