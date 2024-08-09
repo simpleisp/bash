@@ -81,7 +81,7 @@ sudo apt-get install -y php-common php-gd php-curl php-mysql php-fpm php-zip php
 # Git clone laravel app
 
 # Set the remote repository URL
-REPO_URL="https://github.com/simpleisp/radius.git"
+REPO_URL="https://github.com/mymanga/radius.git"
 
 # Set the path to the local Laravel application directory
 LOCAL_PATH="/var/www/html"
