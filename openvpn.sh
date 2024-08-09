@@ -626,11 +626,13 @@ function installOpenVPN() {
 
 		# Behind NAT, we'll default to the publicly reachable IPv4/IPv6.
 		if [[ $IPV6_SUPPORT == "y" ]]; then
-			if ! PUBLIC_IP=$(curl -f --retry 5 --retry-connrefused https://api.seeip.org); then
+
+			if ! PUBLIC_IP=$(curl -f --retry 5 --retry-connrefused https://ipv4.icanhazip.com); then
 				PUBLIC_IP=$(dig -6 TXT +short o-o.myaddr.l.google.com @ns1.google.com | tr -d '"')
 			fi
 		else
-			if ! PUBLIC_IP=$(curl -f --retry 5 --retry-connrefused -4 https://api.seeip.org); then
+			if ! PUBLIC_IP=$(curl -f --retry 5 --retry-connrefused -4 https://ipv4.icanhazip.com); then
+
 				PUBLIC_IP=$(dig -4 TXT +short o-o.myaddr.l.google.com @ns1.google.com | tr -d '"')
 			fi
 		fi
