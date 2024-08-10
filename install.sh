@@ -81,7 +81,7 @@ sudo apt-get install -y php-common php-gd php-curl php-mysql php-fpm php-zip php
 # Git clone laravel app
 
 # Set the remote repository URL
-REPO_URL="https://github.com/mymanga/radius.git"
+REPO_URL="https://github.com/simpleisp/radius.git"
 
 # Set the path to the local Laravel application directory
 LOCAL_PATH="/var/www/html"
@@ -108,7 +108,7 @@ if [ ! -d "$LOCAL_PATH/public" ] || [ ! -f "$LOCAL_PATH/public/index.php" ]; the
     fi
 
     # Clone the repository into the local Laravel application directory
-    git clone "$REPO_URL" "$LOCAL_PATH" || { echo "Cloning failed. Restoring original /var/www/html and exiting."; mv "$TEMP_PATH" "$LOCAL_PATH"; exit 1; }
+    git clone --branch "$BRANCH" "$REPO_URL" "$LOCAL_PATH" || { echo "Cloning failed. Restoring original /var/www/html and exiting."; mv "$TEMP_PATH" "$LOCAL_PATH"; exit 1; }
 
     # Remove the temporary backup directory if it exists
     if [ -d "$TEMP_PATH" ]; then
