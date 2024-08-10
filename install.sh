@@ -108,7 +108,7 @@ if [ ! -d "$LOCAL_PATH/public" ] || [ ! -f "$LOCAL_PATH/public/index.php" ]; the
     fi
 
     # Clone the repository into the local Laravel application directory
-    git "$BRANCH" "$REPO_URL" "$LOCAL_PATH" || { echo "Cloning failed. Restoring original /var/www/html and exiting."; mv "$TEMP_PATH" "$LOCAL_PATH"; exit 1; }
+    git clone "$REPO_URL" "$LOCAL_PATH" || { echo "Cloning failed. Restoring original /var/www/html and exiting."; mv "$TEMP_PATH" "$LOCAL_PATH"; exit 1; }
 
     # Remove the temporary backup directory if it exists
     if [ -d "$TEMP_PATH" ]; then
