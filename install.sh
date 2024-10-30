@@ -249,6 +249,7 @@ sudo chmod -R 777 /var/www/html/storage
 sudo chmod -R 777 /var/www/html/bootstrap/cache 
 sudo chown -R www-data:www-data /var/www/html/bootstrap/cache
 sudo timedatectl set-timezone Africa/Nairobi
+sudo ufw allow 1812:1813/udp
 
 # Make script executable
 chmod +x /var/www/html/sh/set_permissions.sh
