@@ -35,7 +35,8 @@ sudo apt update
 sudo apt install -y nginx
 
 # Adjusting the firewall
-sudo ufw allow 'Nginx Full'
+sudo ufw allow http
+sudo ufw allow https
 
 # Step 3: Prompt user for domain name
 read -p "Enter your domain name (e.g., example.com): " domain_name
