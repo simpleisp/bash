@@ -268,11 +268,9 @@ rm cronjob
 # Step 5: Prompt user for email address and install Certbot
 read -p "Enter your email address for certificate management: " email_address
 
-# Install Certbot using Snap
-sudo snap install --classic certbot
+# Install Certbot 
+sudo apt install python3-certbot-nginx
 
-# Create a symbolic link to the Certbot executable in /usr/bin
-sudo ln -s /snap/bin/certbot /usr/bin/certbot
 
 # Run Certbot for the given domain
 sudo certbot --nginx -d $domain_name --agree-tos --email $email_address --no-eff-email --non-interactive
