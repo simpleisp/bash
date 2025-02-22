@@ -35,7 +35,8 @@ sudo apt update
 sudo apt install -y nginx
 
 # Adjusting the firewall
-sudo ufw allow 'Nginx Full'
+sudo ufw allow http
+sudo ufw allow https
 
 # Step 3: Prompt user for domain name
 read -p "Enter your domain name (e.g., example.com): " domain_name
@@ -249,6 +250,7 @@ sudo chmod -R 777 /var/www/html/storage
 sudo chmod -R 777 /var/www/html/bootstrap/cache 
 sudo chown -R www-data:www-data /var/www/html/bootstrap/cache
 sudo timedatectl set-timezone Africa/Nairobi
+sudo ufw allow 1812:1813/udp
 
 # Make script executable
 chmod +x /var/www/html/sh/set_permissions.sh
@@ -267,11 +269,9 @@ rm cronjob
 # Step 5: Prompt user for email address and install Certbot
 read -p "Enter your email address for certificate management: " email_address
 
-# Install Certbot using Snap
-sudo snap install --classic certbot
+# Install Certbot 
+sudo apt install python3-certbot-nginx -y
 
-# Create a symbolic link to the Certbot executable in /usr/bin
-sudo ln -s /snap/bin/certbot /usr/bin/certbot
 
 # Run Certbot for the given domain
 sudo certbot --nginx -d $domain_name --agree-tos --email $email_address --no-eff-email --non-interactive
