@@ -270,7 +270,7 @@ rm cronjob
 read -p "Enter your email address for certificate management: " email_address
 
 # Install Certbot 
-sudo apt install python3-certbot-nginx
+sudo apt install python3-certbot-nginx -y
 
 
 # Run Certbot for the given domain
