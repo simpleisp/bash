@@ -160,7 +160,7 @@ chmod +x openvpn.sh
 cat > /etc/nginx/sites-available/default << EOL
 server {
     listen 80;
-    server_name _;
+    server_name $DOMAIN;
     root /var/www/html/public;
 
     add_header X-Frame-Options "SAMEORIGIN";
