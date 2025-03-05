@@ -254,13 +254,15 @@ systemctl restart supervisor
 systemctl restart freeradius
 systemctl restart OpenVPN
 
-# Open Firewall Ports
+# Open Firewall Ports and enable ufw
 ufw allow ssh
 ufw allow 9080/tcp
 ufw allow http
 ufw allow https
 ufw allow 1194/tcp
 ufw allow 1812:1813/udp
+ufw reload
+yes | ufw enable
 
 # Configure SSL with Certbot
 echo "Configuring SSL certificate for $DOMAIN"
