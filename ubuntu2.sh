@@ -160,7 +160,7 @@ chmod +x openvpn.sh
 cat > /etc/nginx/sites-available/default << EOL
 server {
     listen 80;
-    server_name _;
+    server_name $DOMAIN;
     root /var/www/html/public;
 
     add_header X-Frame-Options "SAMEORIGIN";
@@ -252,7 +252,17 @@ systemctl restart nginx
 systemctl restart php7.4-fpm
 systemctl restart supervisor
 systemctl restart freeradius
-systemctl restart openvpn
+systemctl restart OpenVPN
+
+# Open Firewall Ports and enable ufw
+ufw allow ssh
+ufw allow 9080/tcp
+ufw allow http
+ufw allow https
+ufw allow 1194/tcp
+ufw allow 1812:1813/udp
+ufw reload
+yes | ufw enable
 
 # Configure SSL with Certbot
 echo "Configuring SSL certificate for $DOMAIN"
