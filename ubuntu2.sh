@@ -252,7 +252,15 @@ systemctl restart nginx
 systemctl restart php7.4-fpm
 systemctl restart supervisor
 systemctl restart freeradius
-systemctl restart openvpn
+systemctl restart OpenVPN
+
+# Open Firewall Ports
+ufw allow ssh
+ufw allow 9080/tcp
+ufw allow http
+ufw allow https
+ufw allow 1194/tcp
+ufw allow 1812:1813/udp
 
 # Configure SSL with Certbot
 echo "Configuring SSL certificate for $DOMAIN"
