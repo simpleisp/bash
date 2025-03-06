@@ -6,6 +6,11 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Setup logging
+INSTALL_LOG="/home/sisp/install.txt"
+touch $INSTALL_LOG
+exec &> >(tee -a "$INSTALL_LOG")
+
 # Get server hostname and set email
 DOMAIN=$(hostname -f)
 EMAIL_ADDRESS="simpluxsolutions@gmail.com"
@@ -50,7 +55,7 @@ systemctl enable mariadb
 MYSQL_USER="user_$(openssl rand -hex 3)"
 MYSQL_PASSWORD="$(openssl rand -base64 12)"
 MYSQL_DATABASE="radius"
-DB_CREDENTIALS_FILE="/var/www/html/db.txt"
+DB_CREDENTIALS_FILE="/home/sisp/db.txt"
 
 # Secure MariaDB installation
 mysql -e "UPDATE mysql.user SET Password=PASSWORD('$MYSQL_PASSWORD') WHERE User='root';"
@@ -101,21 +106,25 @@ sed -i "s|DB_PORT=.*|DB_PORT=3306|" .env
 sed -i "s|DB_DATABASE=.*|DB_DATABASE=$MYSQL_DATABASE|" .env
 sed -i "s|DB_USERNAME=.*|DB_USERNAME=$MYSQL_USER|" .env
 sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$MYSQL_PASSWORD|" .env
+sed -i "s|APP_URL=.*|APP_URL=https://$DOMAIN|" .env
 
 # Configure FreeRADIUS
 SQL_FILE="/etc/freeradius/3.0/mods-available/sql"
 if [ -f "$SQL_FILE" ]; then
-    sed -i "s|server = .*|server = \"localhost\"|" "$SQL_FILE"
-    sed -i "s|port = .*|port = 3306|" "$SQL_FILE"
-    sed -i "s|login = .*|login = \"$MYSQL_USER\"|" "$SQL_FILE"
-    sed -i "s|password = .*|password = \"$MYSQL_PASSWORD\"|" "$SQL_FILE"
-    sed -i "s|radius_db = .*|radius_db = \"$MYSQL_DATABASE\"|" "$SQL_FILE"
+    # Ensure MySQL connection settings are uncommented and updated
+    sed -i 's/[# ]*driver = "rlm_sql_null"/        driver = "rlm_sql_mysql"/' "$SQL_FILE"
+    sed -i 's/[# ]*dialect = "mysql"/        dialect = "mysql"/' "$SQL_FILE"
+    sed -i 's/[# ]*server = .*/        server = "localhost"/' "$SQL_FILE"
+    sed -i 's/[# ]*port = .*/        port = 3306/' "$SQL_FILE"
+    sed -i 's/[# ]*login = .*/        login = "'"$MYSQL_USER"'"/' "$SQL_FILE"
+    sed -i 's/[# ]*password = .*/        password = "'"$MYSQL_PASSWORD"'"/' "$SQL_FILE"
+    sed -i 's/[# ]*radius_db = .*/        radius_db = "'"$MYSQL_DATABASE"'"/' "$SQL_FILE"
 
     # Comment out TLS configuration
-    sed -i '/mysql {/,/^[[:space:]]*}$/c\mysql {\n\t# TLS configuration commented out\n}' "$SQL_FILE"
+    sed -i '/mysql {/,/^[[:space:]]*}$/c\mysql {\n        # TLS configuration commented out' "$SQL_FILE"
     
     # Uncomment client_table
-    sed -i 's|#[[:space:]]*client_table = "nas"|        client_table = "nas"|' "$SQL_FILE"
+    sed -i 's/[# ]*client_table = "nas"/        client_table = "nas"/' "$SQL_FILE"
 
     # Enable SQL module in FreeRADIUS
     ln -sf /etc/freeradius/3.0/mods-available/sql /etc/freeradius/3.0/mods-enabled/
@@ -160,36 +169,34 @@ chmod +x openvpn.sh
 cat > /etc/nginx/sites-available/default << EOL
 server {
     listen 80;
-    server_name $DOMAIN;
+    listen [::]:80;
+
     root /var/www/html/public;
+    index index.php index.html index.htm index.nginx-debian.html;
 
-    add_header X-Frame-Options "SAMEORIGIN";
-    add_header X-Content-Type-Options "nosniff";
-
-    index index.php;
-
-    charset utf-8;
+    server_name $DOMAIN;
 
     location / {
         try_files \$uri \$uri/ /index.php?\$query_string;
     }
 
-    location = /favicon.ico { access_log off; log_not_found off; }
-    location = /robots.txt  { access_log off; log_not_found off; }
-
-    error_page 404 /index.php;
-
     location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/var/run/php/php7.4-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
-        include fastcgi_params;
     }
 
-    location ~ /\.(?!well-known).* {
+    location ~ /\.ht {
         deny all;
     }
 }
 EOL
+
+# Test the Nginx configuration
+nginx -t
+
+# If the configuration is OK, reload and restart Nginx
+systemctl reload nginx
+systemctl restart nginx
 
 # Set correct permissions
 chown -R www-data:www-data /var/www/html
@@ -252,7 +259,7 @@ systemctl restart nginx
 systemctl restart php7.4-fpm
 systemctl restart supervisor
 systemctl restart freeradius
-systemctl restart OpenVPN
+systemctl restart openvpn
 
 # Open Firewall Ports and enable ufw
 ufw allow ssh
@@ -271,3 +278,4 @@ certbot --nginx -d "$DOMAIN" --agree-tos --email "$EMAIL_ADDRESS" --no-eff-email
 echo "Installation completed successfully!"
 echo "You can find your database credentials in $DB_CREDENTIALS_FILE"
 echo "Your SimpleISP installation is available at: https://$DOMAIN"
+echo "Installation logs are available at: $INSTALL_LOG"
