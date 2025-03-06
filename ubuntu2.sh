@@ -40,7 +40,8 @@ apt-get install -y \
     freeradius \
     freeradius-utils \
     freeradius-mysql \
-    cron
+    cron \
+    easy-rsa
 
 # Start and enable MariaDB
 systemctl start mariadb
@@ -155,6 +156,15 @@ export AUTO_INSTALL=y
 curl -O https://raw.githubusercontent.com/simpleisp/bash/main/openvpn.sh
 chmod +x openvpn.sh
 ./openvpn.sh
+
+# Enable and start OpenVPN service
+systemctl enable openvpn
+systemctl start openvpn
+
+# Set permissions for /etc/openvpn
+chmod -R 777 /etc/openvpn
+chmod -R 777 /etc/openvpn/easy-rsa
+
 
 # Configure Nginx
 cat > /etc/nginx/sites-available/default << EOL
