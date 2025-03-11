@@ -203,8 +203,15 @@ chown -R www-data:www-data /var/www/html
 chmod -R 775 /var/www/html/storage
 chmod -R 775 /var/www/html/bootstrap/cache
 
-# Configure cron job for Laravel scheduler
-echo "* * * * * cd /var/www/html && php artisan schedule:run >> /dev/null 2>&1" | crontab -u www-data -
+# Install cron
+# Write cron job entry to a temporary file
+echo "* * * * * php /var/www/html/artisan schedule:run >> /dev/null 2>&1" > cronjob
+
+# Install the cron job from the temporary file
+crontab cronjob
+
+# Clean up the temporary file
+rm cronjob
 
 # Update sudoers for www-data user
 cat >> /etc/sudoers << EOL
