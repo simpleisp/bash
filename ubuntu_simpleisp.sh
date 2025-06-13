@@ -45,9 +45,6 @@ if [ -f "$CLEANUP_MARKER" ]; then
     log_info "Forcing reinstallation of critical directories and files"
     FORCE_REINSTALL=true
     
-    # Create critical directories that might be missing after cleanup
-    mkdir -p /etc/freeradius/mods-available /etc/freeradius/mods-enabled /etc/freeradius/sites-available /etc/freeradius/sites-enabled /var/log/freeradius /var/lib/freeradius
-    
     # Remove the marker file after handling it
     rm -f "$CLEANUP_MARKER"
     log_success "Cleanup marker processed and removed"
