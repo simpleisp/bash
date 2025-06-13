@@ -36,6 +36,23 @@ touch "$INSTALL_LOG" || { echo "Cannot create log file"; exit 1; }
 echo "SimpleISP Installation Log - $(date '+%Y-%m-%d %H:%M:%S')" > "$INSTALL_LOG"
 echo "----------------------------------------" >> "$INSTALL_LOG"
 
+# Check for cleanup marker file
+CLEANUP_MARKER="/root/.simpleisp_cleanup_done"
+FORCE_REINSTALL=false
+
+if [ -f "$CLEANUP_MARKER" ]; then
+    log_info "Detected previous cleanup ($(cat $CLEANUP_MARKER))"
+    log_info "Forcing reinstallation of critical directories and files"
+    FORCE_REINSTALL=true
+    
+    # Create critical directories that might be missing after cleanup
+    mkdir -p /etc/freeradius/mods-available /etc/freeradius/mods-enabled /etc/freeradius/sites-available /etc/freeradius/sites-enabled /var/log/freeradius /var/lib/freeradius
+    
+    # Remove the marker file after handling it
+    rm -f "$CLEANUP_MARKER"
+    log_success "Cleanup marker processed and removed"
+fi
+
 # Ensure script runs as root
 log_step "Checking root privileges"
 if [ "$EUID" -ne 0 ]; then
@@ -118,33 +135,64 @@ COMPLETED_STEPS+=("System packages updated")
 
 # Install required packages
 log_step "Installing required packages"
-apt-get install -y \
-    nginx-full \
-    python3-certbot-nginx \
-    php7.4-fpm \
-    php7.4-mysql \
-    php7.4-curl \
-    php7.4-zip \
-    php7.4-common \
-    php7.4-gd \
-    php7.4-mbstring \
-    php7.4-xml \
-    git \
-    unzip \
-    curl \
-    supervisor \
-    openssl \
-    mariadb-server \
-    mariadb-client \
-    freeradius \
-    freeradius-utils \
-    freeradius-mysql \
-    freeradius-redis \
-    cron \
-    easy-rsa \
-    redis-tools \
-    golang-go \
-    software-properties-common || handle_error "Failed to install required packages"
+
+# Install packages with special handling for post-cleanup reinstallation
+if [ "$FORCE_REINSTALL" = true ]; then
+    log_info "Reinstalling packages with --force-confmiss to restore configuration files"
+    apt-get install --reinstall -y -o Dpkg::Options::="--force-confmiss" \
+        nginx-full \
+        python3-certbot-nginx \
+        php7.4-fpm \
+        php7.4-mysql \
+        php7.4-curl \
+        php7.4-zip \
+        php7.4-common \
+        php7.4-gd \
+        php7.4-mbstring \
+        php7.4-xml \
+        git \
+        unzip \
+        curl \
+        supervisor \
+        openssl \
+        mariadb-server \
+        mariadb-client \
+        freeradius \
+        freeradius-utils \
+        freeradius-mysql \
+        cron \
+        easy-rsa \
+        golang-go \
+        software-properties-common || handle_error "Failed to reinstall packages with forced configuration"
+    log_success "All packages reinstalled with configuration files restored"
+else
+    # Normal installation
+    apt-get install -y \
+        nginx-full \
+        python3-certbot-nginx \
+        php7.4-fpm \
+        php7.4-mysql \
+        php7.4-curl \
+        php7.4-zip \
+        php7.4-common \
+        php7.4-gd \
+        php7.4-mbstring \
+        php7.4-xml \
+        git \
+        unzip \
+        curl \
+        supervisor \
+        openssl \
+        mariadb-server \
+        mariadb-client \
+        freeradius \
+        freeradius-utils \
+        freeradius-mysql \
+        cron \
+        easy-rsa \
+        golang-go \
+        software-properties-common || handle_error "Failed to install required packages"
+fi
 COMPLETED_STEPS+=("Required packages installed")
 
 # Set default timezone
@@ -214,16 +262,45 @@ if ! command -v composer &> /dev/null; then
 fi
 COMPLETED_STEPS+=("Composer installed")
 
+# Create DragonflyDB installation script instead of installing directly
+log_step "Creating DragonflyDB installation script"
+cat > /root/install_dragonfly.sh << 'EOL'
+#!/bin/bash
+
+# DragonflyDB Installation Script
+echo "[$(date)] Starting DragonflyDB installation..."
+
+# Function to handle errors
+handle_error() {
+    echo "[$(date)] ERROR: $1"
+    exit 1
+}
+
+# Function to log steps
+log_step() {
+    echo "[$(date)] STEP: $1"
+}
+
+# Install required packages
+log_step "Installing required packages"
+apt-get update || handle_error "Failed to update package lists"
+apt-get install -y redis-tools freeradius-redis || handle_error "Failed to install Redis tools and FreeRADIUS Redis module"
+
+# Download DragonflyDB
+log_step "Downloading DragonflyDB"
+wget https://dragonflydb.gateway.scarf.sh/latest/dragonfly_amd64.deb || handle_error "Failed to download DragonflyDB"
+
 # Install DragonflyDB
 log_step "Installing DragonflyDB"
-wget  https://dragonflydb.gateway.scarf.sh/latest/dragonfly_amd64.deb || handle_error "Failed to download DragonflyDB"
 dpkg -i dragonfly_amd64.deb || handle_error "Failed to install DragonflyDB"
 apt install -fy || handle_error "Failed to install DragonflyDB dependencies"
-COMPLETED_STEPS+=("DragonflyDB installed")
 
-# Configure DragonflyDB
+# Create directories if they don't exist
+mkdir -p /var/run/dragonfly /var/log/dragonfly /var/lib/dragonfly
+
+# Configure DragonflyDB with 6GB memory allocation (for 8GB+ servers)
 log_step "Configuring DragonflyDB"
-cat > /etc/dragonfly/dragonfly.conf << 'EOL'
+cat > /etc/dragonfly/dragonfly.conf << 'CONF'
 --pidfile=/var/run/dragonfly/dragonfly.pid
 --log_dir=/var/log/dragonfly
 --dir=/var/lib/dragonfly
@@ -231,33 +308,21 @@ cat > /etc/dragonfly/dragonfly.conf << 'EOL'
 --version_check=true
 --cache_mode=true  
 --snapshot_cron=*/30 * * * * 
---maxmemory=4gb 
+--maxmemory=6gb 
 --keys_output_limit=12288 
 --dbfilename=dump
-EOL
+CONF
 
-chown dfly:dfly /etc/dragonfly/dragonfly.conf || handle_error "Failed to set DragonflyDB config permissions"
+# Set proper permissions
+chown -R dfly:dfly /etc/dragonfly /var/run/dragonfly /var/log/dragonfly /var/lib/dragonfly || handle_error "Failed to set DragonflyDB permissions"
 
-# Setup DragonflyDB service
-# Default is to not enable the service (0=off, 1=on)
-ENABLE_DRAGONFLY=0
-log_info "DragonflyDB auto-start is set to: $([ "$ENABLE_DRAGONFLY" -eq 1 ] && echo "ON" || echo "OFF")"
-
-# Always start the service for this session
-systemctl start dragonfly.service || handle_error "Failed to start DragonflyDB"
-
-# Only enable the service if flag is set to 1
-if [ "$ENABLE_DRAGONFLY" -eq 1 ]; then
-    systemctl enable dragonfly.service || handle_error "Failed to enable DragonflyDB"
-    log_success "DragonflyDB service enabled to start on boot"
-else
-    systemctl disable dragonfly.service || log_info "DragonflyDB service will not start on boot"
-    log_success "DragonflyDB started for this session only (not enabled on boot)"
-fi
-COMPLETED_STEPS+=("DragonflyDB configured")
+# Enable and start DragonflyDB service
+log_step "Starting DragonflyDB service"
+systemctl enable dragonfly || handle_error "Failed to enable DragonflyDB service"
+systemctl start dragonfly || handle_error "Failed to start DragonflyDB service"
 
 # Configure Redis modules for FreeRADIUS
-log_step "Configuring Redis modules"
+log_step "Configuring Redis modules for FreeRADIUS"
 
 # Configure Redis module
 if [ -f "/etc/freeradius/mods-available/redis" ]; then
@@ -268,10 +333,11 @@ else
 fi
 
 # Enable modules
-log_step "Enabling modules"
-ln -sf /etc/freeradius/mods-available/redis /etc/freeradius/mods-enabled/ || handle_error "Failed to enable Redis module"
-ln -sf /etc/freeradius/mods-available/rediswho /etc/freeradius/mods-enabled/ || handle_error "Failed to enable RedisWho module"
-ln -sf /etc/freeradius/mods-available/sql /etc/freeradius/mods-enabled/ || handle_error "Failed to enable SQL module"
+log_step "Enabling Redis modules"
+# Ensure the mods-enabled directory exists
+mkdir -p /etc/freeradius/mods-enabled || handle_error "Failed to create FreeRADIUS mods-enabled directory"
+ln -sf /etc/freeradius/mods-available/redis /etc/freeradius/mods-enabled/redis || handle_error "Failed to enable Redis module"
+ln -sf /etc/freeradius/mods-available/rediswho /etc/freeradius/mods-enabled/rediswho || handle_error "Failed to enable RedisWho module"
 
 # Setup Redis monitoring
 log_step "Setting up Redis monitoring"
@@ -342,11 +408,85 @@ EOF
 
 chmod +x /usr/local/bin/redis-debug.sh
 
-COMPLETED_STEPS+=("Redis monitoring configured")
-
 # Enable buffered-sql site
-ln -sf /etc/freeradius/sites-available/buffered-sql /etc/freeradius/sites-enabled/ || handle_error "Failed to enable buffered-sql site"
-COMPLETED_STEPS+=("Buffered SQL site enabled")
+log_step "Enabling buffered-sql site"
+# Ensure the sites-enabled directory exists
+mkdir -p /etc/freeradius/sites-enabled || handle_error "Failed to create FreeRADIUS sites-enabled directory"
+ln -sf /etc/freeradius/sites-available/buffered-sql /etc/freeradius/sites-enabled/buffered-sql || handle_error "Failed to enable buffered-sql site"
+
+# Update default site to use Redis modules
+log_step "Configuring Redis in sites"
+DEFAULT_SITE="/etc/freeradius/sites-enabled/default"
+
+# Add rediswho to authorize section after sql (commented out)
+if [ -f "$DEFAULT_SITE" ]; then
+    sed -i '/^[[:space:]]*sql[[:space:]]*$/a\        #rediswho' "$DEFAULT_SITE" || handle_error "Failed to add rediswho to default site authorize section"
+else
+    handle_error "Default site configuration file not found"
+fi
+
+# Restart FreeRADIUS to apply Redis configuration
+log_step "Restarting FreeRADIUS to apply Redis configuration"
+systemctl restart freeradius || handle_error "Failed to restart FreeRADIUS"
+
+# Verify Redis is working
+log_step "Verifying Redis installation"
+if ! systemctl is-active --quiet dragonfly; then
+    handle_error "DragonflyDB service is not running"
+fi
+
+# Test Redis connectivity and basic operations
+if [ "$(redis-cli ping)" != "PONG" ]; then
+    handle_error "Redis is not responding to ping"
+fi
+
+# Test Redis write operation
+if [ "$(redis-cli set test_key test_value)" != "OK" ]; then
+    handle_error "Redis write operation failed"
+fi
+
+# Test Redis read operation
+TEST_VALUE=$(redis-cli get test_key)
+if [ "$TEST_VALUE" != "test_value" ]; then
+    handle_error "Redis read operation failed"
+fi
+
+# Test Redis delete operation
+if [ "$(redis-cli del test_key)" != "1" ]; then
+    handle_error "Redis delete operation failed"
+fi
+
+# Check Redis info for basic stats
+if ! redis-cli info | grep -q "redis_version"; then
+    handle_error "Unable to get Redis server information"
+fi
+
+# Clean up installation files
+log_step "Cleaning up installation files"
+rm -f dragonfly_amd64.deb || echo "Warning: Could not remove DragonflyDB installation file"
+
+echo "[$(date)] DragonflyDB installation completed successfully!"
+echo "DragonflyDB is running and configured for FreeRADIUS integration."
+echo "Redis monitoring is set up with logs at /var/log/freeradius/redis-monitor.log"
+echo "For troubleshooting, run: /usr/local/bin/redis-debug.sh"
+EOL
+
+# Make the script executable
+chmod +x /root/install_dragonfly.sh || handle_error "Failed to make DragonflyDB installation script executable"
+
+COMPLETED_STEPS+=("DragonflyDB installation script created at /root/install_dragonfly.sh")
+
+log_success "DragonflyDB installation script created at /root/install_dragonfly.sh"
+log_info "To install DragonflyDB, manually run: /root/install_dragonfly.sh"
+log_info "Note: DragonflyDB is NOT installed or started automatically."
+
+COMPLETED_STEPS+=("DragonflyDB installation script created at /root/install_dragonfly.sh")
+
+# Enable SQL module for FreeRADIUS
+log_step "Enabling SQL module"
+# Ensure the mods-enabled directory exists
+mkdir -p /etc/freeradius/mods-enabled || handle_error "Failed to create FreeRADIUS mods-enabled directory"
+ln -sf /etc/freeradius/mods-available/sql /etc/freeradius/mods-enabled/sql || handle_error "Failed to enable SQL module"
 
 # Setup Laravel application
 log_step "Setting up Laravel application"
@@ -419,58 +559,15 @@ if [ -f "$DEFAULT_SITE" ]; then
     sed -i 's/^[[:space:]]*detail/#       detail/' "$DEFAULT_SITE" || handle_error "Failed to comment out detail line in FreeRADIUS default site configuration"
 fi
 
-# Update default site to use Redis modules
-log_step "Configuring Redis in sites"
-DEFAULT_SITE="/etc/freeradius/sites-enabled/default"
 
-# Add rediswho to authorize section after sql (commented out)
-if [ -f "$DEFAULT_SITE" ]; then
-    sed -i '/^[[:space:]]*sql[[:space:]]*$/a\        #rediswho' "$DEFAULT_SITE" || handle_error "Failed to add rediswho to default site authorize section"
-else
-    handle_error "Default site configuration file not found"
-fi
 
 COMPLETED_STEPS+=("FreeRADIUS default site configured")
 
 # Restart services
 log_step "Restarting services"
-systemctl restart dragonfly || handle_error "Failed to restart DragonflyDB"
+systemctl restart mariadb || handle_error "Failed to restart MariaDB"
 systemctl restart freeradius || handle_error "Failed to restart FreeRADIUS"
 COMPLETED_STEPS+=("Services restarted")
-
-# Verify Redis is working
-log_step "Verifying Redis installation"
-if ! systemctl is-active --quiet dragonfly; then
-    handle_error "DragonflyDB service is not running"
-fi
-
-# Test Redis connectivity and basic operations
-if [ "$(redis-cli ping)" != "PONG" ]; then
-    handle_error "Redis is not responding to ping"
-fi
-
-# Test Redis write operation
-if [ "$(redis-cli set test_key test_value)" != "OK" ]; then
-    handle_error "Redis write operation failed"
-fi
-
-# Test Redis read operation
-TEST_VALUE=$(redis-cli get test_key)
-if [ "$TEST_VALUE" != "test_value" ]; then
-    handle_error "Redis read operation failed"
-fi
-
-# Test Redis delete operation
-if [ "$(redis-cli del test_key)" != "1" ]; then
-    handle_error "Redis delete operation failed"
-fi
-
-# Check Redis info for basic stats
-if ! redis-cli info | grep -q "redis_version"; then
-    handle_error "Unable to get Redis server information"
-fi
-
-COMPLETED_STEPS+=("Redis functionality verified")
 
 # Test FreeRADIUS configuration
 log_step "Testing FreeRADIUS configuration"
@@ -754,7 +851,226 @@ echo "Configuring SSL certificate for $DOMAIN"
 certbot --nginx -d "$DOMAIN" --agree-tos --email "$EMAIL_ADDRESS" --no-eff-email --non-interactive --redirect || handle_error "Failed to configure SSL with Certbot"
 COMPLETED_STEPS+=("SSL configured with Certbot")
 
+# Create cleanup script for uninstalling all software
+log_step "Creating cleanup script"
+cat > /root/clean_server.sh << 'EOL'
+#!/bin/bash
+
+# Cleanup script for SimpleISP
+# This script will uninstall all software installed by the SimpleISP installer
+# and clean the server for reinstallation
+
+echo "[$(date)] Starting cleanup process..."
+
+# Function to handle errors
+handle_error() {
+    echo "[$(date)] ERROR: $1"
+    exit 1
+}
+
+# Function to log steps
+log_step() {
+    echo "[$(date)] STEP: $1"
+}
+
+# Confirm before proceeding
+echo "WARNING: This will remove ALL software installed by SimpleISP and delete all data."
+echo "This action CANNOT be undone!"
+read -p "Are you sure you want to proceed? (y/n): " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Cleanup cancelled."
+    exit 0
+fi
+
+# Stop and disable all services
+log_step "Stopping and disabling services"
+services=("nginx" "php7.4-fpm" "php8.2-fpm" "supervisor" "freeradius" "openvpn" "mariadb" "redis-server" "dragonfly")
+for service in "${services[@]}"; do
+    systemctl stop $service 2>/dev/null || echo "Service $service not running or not found"
+    systemctl disable $service 2>/dev/null || echo "Service $service could not be disabled or not found"
+    echo "Stopped and disabled $service"
+done
+
+# Remove Laravel application
+log_step "Removing Laravel application"
+rm -rf /var/www/html/* 2>/dev/null || echo "No web files to remove"
+
+# Remove SSL certificates
+log_step "Removing SSL certificates"
+certbot delete --non-interactive --cert-name $(ls -1 /etc/letsencrypt/live/ 2>/dev/null | head -n 1) 2>/dev/null || echo "No certificates to remove"
+rm -rf /etc/letsencrypt 2>/dev/null
+
+# Drop all databases
+log_step "Dropping databases"
+mysql -e "DROP DATABASE IF EXISTS simpleisp;" 2>/dev/null || echo "Could not drop simpleisp database"
+mysql -e "DROP DATABASE IF EXISTS radius;" 2>/dev/null || echo "Could not drop radius database"
+
+# Remove all database users
+log_step "Removing database users"
+mysql -e "DROP USER IF EXISTS 'simpleisp'@'%';" 2>/dev/null || echo "Could not remove simpleisp user"
+mysql -e "DROP USER IF EXISTS 'radius'@'%';" 2>/dev/null || echo "Could not remove radius user"
+mysql -e "FLUSH PRIVILEGES;" 2>/dev/null
+
+# Remove OpenVPN and its configurations
+log_step "Removing OpenVPN"
+rm -rf /etc/openvpn/* 2>/dev/null
+rm -rf /root/openvpn-ca 2>/dev/null
+rm -f /root/openvpn.sh 2>/dev/null
+rm -f /root/*.ovpn 2>/dev/null
+
+# Remove Composer
+log_step "Removing Composer"
+rm -f /usr/local/bin/composer 2>/dev/null
+
+# Remove all PHP packages and dependencies
+log_step "Purging PHP packages"
+apt purge -y php* 2>/dev/null || echo "Some PHP packages could not be purged"
+
+# Remove all installed packages
+log_step "Purging all installed packages"
+apt purge -y nginx nginx-common nginx-full mariadb-server mariadb-client redis-server \
+php7.4 php7.4-fpm php7.4-common php7.4-mysql php7.4-cli php7.4-curl php7.4-json php7.4-mbstring php7.4-xml php7.4-zip php7.4-gd php7.4-intl \
+php8.2 php8.2-fpm php8.2-common php8.2-mysql php8.2-cli php8.2-curl php8.2-mbstring php8.2-xml php8.2-zip php8.2-gd php8.2-intl \
+freeradius freeradius-mysql freeradius-utils freeradius-redis \
+supervisor certbot python3-certbot-nginx openvpn easy-rsa \
+dragonfly git unzip curl redis-tools golang-go software-properties-common 2>/dev/null || echo "Some packages could not be purged"
+
+# Remove PPAs and repositories
+log_step "Removing PPAs and repositories"
+rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.list 2>/dev/null
+rm -f /etc/apt/sources.list.d/ondrej-ubuntu-php-*.sources 2>/dev/null
+rm -f /etc/apt/sources.list.d/networkradius*.list 2>/dev/null
+rm -f /etc/apt/preferences.d/networkradius 2>/dev/null
+rm -f /etc/apt/keyrings/ondrej-ubuntu-php.gpg 2>/dev/null
+rm -f /etc/apt/keyrings/packages.networkradius.com.asc 2>/dev/null
+
+# Clean apt cache
+log_step "Cleaning apt cache"
+apt update
+apt autoremove -y
+apt clean
+
+# Remove configuration directories
+log_step "Removing configuration directories"
+rm -rf /etc/nginx 2>/dev/null
+rm -rf /etc/php 2>/dev/null
+rm -rf /etc/freeradius 2>/dev/null
+rm -rf /etc/openvpn 2>/dev/null
+rm -rf /etc/supervisor 2>/dev/null
+rm -rf /etc/dragonfly 2>/dev/null
+rm -rf /var/lib/dragonfly 2>/dev/null
+rm -rf /var/log/dragonfly 2>/dev/null
+rm -rf /var/run/dragonfly 2>/dev/null
+rm -rf /var/lib/redis 2>/dev/null
+rm -rf /var/log/redis 2>/dev/null
+rm -rf /var/log/nginx 2>/dev/null
+rm -rf /var/log/freeradius 2>/dev/null
+rm -rf /var/log/supervisor 2>/dev/null
+
+# Remove installation files and scripts
+log_step "Removing installation files"
+rm -f /root/install.txt 2>/dev/null
+rm -f /root/db_credentials.txt 2>/dev/null
+rm -f /root/install_dragonfly.sh 2>/dev/null
+rm -f /home/sisp/db.txt 2>/dev/null
+
+# Reset firewall rules
+log_step "Resetting firewall rules"
+ufw reset 2>/dev/null || echo "Could not reset firewall rules"
+ufw disable 2>/dev/null || echo "Could not disable firewall"
+
+# Remove cron jobs
+log_step "Removing cron jobs"
+crontab -r 2>/dev/null || echo "No crontab for root"
+
+# Remove www-data from sudoers
+log_step "Removing www-data from sudoers"
+sed -i '/www-data ALL=NOPASSWD/d' /etc/sudoers 2>/dev/null || echo "Could not remove www-data from sudoers"
+
+# Remove any remaining Laravel files
+log_step "Removing any remaining Laravel files"
+rm -rf /var/www/html/.env* 2>/dev/null
+rm -rf /var/www/html/storage/logs/* 2>/dev/null
+rm -rf /var/www/html/bootstrap/cache/* 2>/dev/null
+
+# Reset MariaDB root password to default (empty)
+log_step "Resetting MariaDB root password"
+systemctl stop mariadb 2>/dev/null
+if command -v mysqld_safe &> /dev/null; then
+    mysqld_safe --skip-grant-tables --skip-networking &
+    sleep 5
+    mysql -e "FLUSH PRIVILEGES; ALTER USER 'root'@'localhost' IDENTIFIED BY '';" 2>/dev/null || echo "Could not reset MariaDB root password"
+    pkill mysqld
+    sleep 5
+fi
+
+# Ensure all MySQL/MariaDB processes are stopped
+log_step "Ensuring all MySQL/MariaDB processes are stopped"
+pkill -9 mysql 2>/dev/null || echo "No MySQL processes running"
+pkill -9 mysqld 2>/dev/null || echo "No MySQL daemon processes running"
+pkill -9 mariadb 2>/dev/null || echo "No MariaDB processes running"
+
+# Complete MySQL/MariaDB removal
+log_step "Performing complete MySQL/MariaDB removal"
+# Stop all related services
+systemctl stop mysql mariadb mysqld 2>/dev/null
+systemctl disable mysql mariadb mysqld 2>/dev/null
+
+# Purge all MySQL/MariaDB packages
+apt-get purge -y mysql* mariadb* 2>/dev/null
+apt-get autoremove -y --purge 2>/dev/null
+apt-get autoclean 2>/dev/null
+
+# Remove all MySQL/MariaDB data files and directories
+rm -rf /var/lib/mysql 2>/dev/null
+rm -rf /var/log/mysql 2>/dev/null
+rm -rf /etc/mysql 2>/dev/null
+rm -rf /etc/my.cnf 2>/dev/null
+rm -rf /etc/my.cnf.d 2>/dev/null
+rm -rf /etc/mariadb 2>/dev/null
+rm -rf /etc/mariadb.conf.d 2>/dev/null
+rm -rf /etc/mariadb.d 2>/dev/null
+rm -rf /var/run/mysqld 2>/dev/null
+rm -rf /run/mysqld 2>/dev/null
+rm -f /root/.my.cnf 2>/dev/null
+rm -f /root/.mysql_history 2>/dev/null
+
+# Remove any remaining MySQL/MariaDB files
+find /etc -name "*mysql*" -exec rm -rf {} \; 2>/dev/null || true
+find /etc -name "*mariadb*" -exec rm -rf {} \; 2>/dev/null || true
+find /var -name "*mysql*" -exec rm -rf {} \; 2>/dev/null || true
+find /var -name "*mariadb*" -exec rm -rf {} \; 2>/dev/null || true
+
+# Remove MySQL/MariaDB users and groups
+userdel -r mysql 2>/dev/null || echo "MySQL user not found"
+groupdel mysql 2>/dev/null || echo "MySQL group not found"
+
+# Remove InnoDB files that might cause issues on reinstall
+rm -f /var/lib/mysql/ib_logfile* 2>/dev/null
+rm -f /var/lib/mysql/ibdata* 2>/dev/null
+rm -f /var/lib/mysql/ibtmp* 2>/dev/null
+rm -f /var/lib/mysql/*.pid 2>/dev/null
+
+# Add a recommendation to reboot before reinstalling
+echo "[$(date)] IMPORTANT: It is strongly recommended to reboot the server before reinstalling."
+echo "[$(date)] Run 'sudo reboot' and then run the installer again after reboot."
+
+# Create cleanup marker file
+echo "[$(date)] Creating cleanup marker file..."
+echo "Cleanup performed on $(date)" > /root/.simpleisp_cleanup_done
+
+echo "[$(date)] Cleanup completed. The server is now clean and ready for reinstallation."
+echo "It is recommended to reboot the server before reinstalling SimpleISP."
+EOL
+
+# Make the cleanup script executable
+chmod +x /root/clean_server.sh || handle_error "Failed to make cleanup script executable"
+
+COMPLETED_STEPS+=("Cleanup script created at /root/clean_server.sh")
+
 log_success "Installation completed successfully!"
 echo "You can find your database credentials in $DB_CREDENTIALS_FILE"
 echo "Your SimpleISP installation is available at: https://$DOMAIN"
 echo "Installation logs are available at: $INSTALL_LOG"
+echo "To uninstall everything and clean the server, run: /root/clean_server.sh"
