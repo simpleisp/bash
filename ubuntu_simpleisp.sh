@@ -158,6 +158,8 @@ if [ "$FORCE_REINSTALL" = true ]; then
         freeradius-utils \
         freeradius-mysql \
         cron \
+        redis-server \
+        redis-tools \
         easy-rsa \
         golang-go \
         software-properties-common || handle_error "Failed to reinstall packages with forced configuration"
