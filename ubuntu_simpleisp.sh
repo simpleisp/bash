@@ -188,6 +188,8 @@ else
         freeradius-utils \
         freeradius-mysql \
         cron \
+        redis-server \
+        redis-tools \
         easy-rsa \
         golang-go \
         software-properties-common || handle_error "Failed to install required packages"
@@ -204,15 +206,103 @@ log_step "Setting default PHP version"
 update-alternatives --set php /usr/bin/php7.4 || handle_error "Failed to set default PHP version"
 COMPLETED_STEPS+=("PHP 7.4 set as default")
 
+# Install and configure ionCube Loader
+log_step "Installing ionCube Loader"
+
+# Get PHP extension directory
+PHP_EXT_DIR=$(php -i | grep extension_dir | awk -F '=>' '{print $2}' | xargs)
+
+# Create temp directory for download
+TMP_DIR=$(mktemp -d)
+cd "$TMP_DIR" || handle_error "Failed to create temp directory"
+
+# Download and extract ionCube Loader
+curl -L -o ioncube.zip https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.zip || handle_error "Failed to download ionCube"
+unzip ioncube.zip || handle_error "Failed to extract ionCube"
+
+# Copy loader to PHP extensions directory
+cp "ioncube/ioncube_loader_lin_7.4.so" "$PHP_EXT_DIR/" || handle_error "Failed to copy ionCube loader"
+
+# Create ionCube ini file
+cat > /etc/php/7.4/mods-available/ioncube.ini << 'EOL'
+zend_extension=ioncube_loader_lin_7.4.so
+EOL
+
+# Enable ionCube for PHP CLI and FPM
+ln -sf /etc/php/7.4/mods-available/ioncube.ini /etc/php/7.4/cli/conf.d/00-ioncube.ini || handle_error "Failed to enable ionCube for CLI"
+ln -sf /etc/php/7.4/mods-available/ioncube.ini /etc/php/7.4/fpm/conf.d/00-ioncube.ini || handle_error "Failed to enable ionCube for FPM"
+
+# Clean up
+cd - || handle_error "Failed to return to previous directory"
+rm -rf "$TMP_DIR"
+
+# Restart PHP-FPM
+systemctl restart php7.4-fpm || handle_error "Failed to restart PHP-FPM"
+
+# Verify ionCube installation
+if php -v | grep -q "ionCube PHP Loader"; then
+    COMPLETED_STEPS+=("ionCube Loader installed and activated")
+else
+    handle_error "ionCube Loader installation verification failed"
+fi
+
 # Start and enable MariaDB
 log_step "Configuring MariaDB"
 systemctl start mariadb || handle_error "Failed to start MariaDB"
 systemctl enable mariadb || handle_error "Failed to enable MariaDB"
 COMPLETED_STEPS+=("MariaDB started and enabled")
 
-# Configure MySQL to allow remote connections
-log_step "Configuring MySQL for remote connections"
-sed -i 's/^bind-address.*$/bind-address = 0.0.0.0/' /etc/mysql/mariadb.conf.d/50-server.cnf || handle_error "Failed to update MySQL bind address"
+# Configure MySQL to allow remote connections and optimize performance
+log_step "Configuring MySQL for remote connections and performance"
+
+# Create MariaDB configuration directory if it doesn't exist
+mkdir -p /etc/mysql/mariadb.conf.d/
+
+# Configure MariaDB
+cat > /etc/mysql/mariadb.conf.d/50-server.cnf << 'EOL'
+[mysqld]
+user                    = mysql
+pid-file                = /run/mysqld/mysqld.pid
+socket                  = /run/mysqld/mysqld.sock
+port                    = 3306
+basedir                 = /usr
+datadir                 = /var/lib/mysql
+tmpdir                  = /tmp
+lc-messages-dir         = /usr/share/mysql
+lc-messages             = en_US
+skip-external-locking
+
+bind-address            = 0.0.0.0
+
+key_buffer_size         = 16M
+max_allowed_packet      = 16M
+thread_stack            = 192K
+thread_cache_size       = 8
+
+myisam-recover-options  = BACKUP
+
+query_cache_limit       = 1M
+query_cache_size        = 16M
+
+expire_logs_days        = 10
+max_binlog_size        = 100M
+
+character-set-server    = utf8mb4
+collation-server        = utf8mb4_general_ci
+
+# Performance optimizations
+innodb_buffer_pool_size = 1G
+innodb_log_file_size = 256M
+innodb_flush_method = O_DIRECT
+innodb_flush_log_at_trx_commit = 2
+innodb_file_per_table = 1
+
+[embedded]
+
+[mariadb]
+
+[mariadb-10.6]
+EOL
 
 # Restart MariaDB to apply changes
 systemctl restart mariadb || handle_error "Failed to restart MariaDB after configuration change"
@@ -261,225 +351,17 @@ if ! command -v composer &> /dev/null; then
 fi
 COMPLETED_STEPS+=("Composer installed")
 
-# Create DragonflyDB installation script instead of installing directly
-log_step "Creating DragonflyDB installation script"
-cat > /root/install_dragonfly.sh << 'EOL'
-#!/bin/bash
+# Enable Redis service
+systemctl enable redis-server || handle_error "Failed to enable Redis service"
+systemctl start redis-server || handle_error "Failed to start Redis service"
+COMPLETED_STEPS+=("Redis Server enabled")
 
-# DragonflyDB Installation Script
-echo "[$(date)] Starting DragonflyDB installation..."
-
-# Function to handle errors
-handle_error() {
-    echo "[$(date)] ERROR: $1"
-    exit 1
-}
-
-# Function to log steps
-log_step() {
-    echo "[$(date)] STEP: $1"
-}
-
-# Install required packages
-log_step "Installing required packages"
-apt-get update || handle_error "Failed to update package lists"
-apt-get install -y redis-tools freeradius-redis || handle_error "Failed to install Redis tools and FreeRADIUS Redis module"
-
-# Download DragonflyDB
-log_step "Downloading DragonflyDB"
-wget https://dragonflydb.gateway.scarf.sh/latest/dragonfly_amd64.deb || handle_error "Failed to download DragonflyDB"
-
-# Install DragonflyDB
-log_step "Installing DragonflyDB"
-dpkg -i dragonfly_amd64.deb || handle_error "Failed to install DragonflyDB"
-apt install -fy || handle_error "Failed to install DragonflyDB dependencies"
-
-# Create directories if they don't exist
-mkdir -p /var/run/dragonfly /var/log/dragonfly /var/lib/dragonfly
-
-# Configure DragonflyDB with 6GB memory allocation (for 8GB+ servers)
-log_step "Configuring DragonflyDB"
-cat > /etc/dragonfly/dragonfly.conf << 'CONF'
---pidfile=/var/run/dragonfly/dragonfly.pid
---log_dir=/var/log/dragonfly
---dir=/var/lib/dragonfly
---max_log_size=1
---version_check=true
---cache_mode=true  
---snapshot_cron=*/30 * * * * 
---maxmemory=6gb 
---keys_output_limit=12288 
---dbfilename=dump
-CONF
-
-# Set proper permissions
-chown -R dfly:dfly /etc/dragonfly /var/run/dragonfly /var/log/dragonfly /var/lib/dragonfly || handle_error "Failed to set DragonflyDB permissions"
-
-# Enable and start DragonflyDB service
-log_step "Starting DragonflyDB service"
-systemctl enable dragonfly || handle_error "Failed to enable DragonflyDB service"
-systemctl start dragonfly || handle_error "Failed to start DragonflyDB service"
-
-# Configure Redis modules for FreeRADIUS
-log_step "Configuring Redis modules for FreeRADIUS"
-
-# Configure Redis module
-if [ -f "/etc/freeradius/mods-available/redis" ]; then
-    # Add db = 0 after port configuration
-    sed -i '/^[[:space:]]*port[[:space:]]*=.*/ a\        db = 0' /etc/freeradius/mods-available/redis
-else
-    handle_error "Redis module configuration file not found"
-fi
-
-# Enable modules
-log_step "Enabling Redis modules"
-# Ensure the mods-enabled directory exists
-mkdir -p /etc/freeradius/mods-enabled || handle_error "Failed to create FreeRADIUS mods-enabled directory"
-ln -sf /etc/freeradius/mods-available/redis /etc/freeradius/mods-enabled/redis || handle_error "Failed to enable Redis module"
-ln -sf /etc/freeradius/mods-available/rediswho /etc/freeradius/mods-enabled/rediswho || handle_error "Failed to enable RedisWho module"
-
-# Setup Redis monitoring
-log_step "Setting up Redis monitoring"
-
-# Create monitoring directory
-mkdir -p /var/log/freeradius || handle_error "Failed to create monitoring directory"
-
-# Create Redis monitoring script
-cat > /usr/local/bin/redis-monitor.sh << 'EOF'
-#!/bin/bash
-
-REDIS_HOST="127.0.0.1"
-REDIS_PORT="6379"
-LOG_FILE="/var/log/freeradius/redis-monitor.log"
-
-log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
-}
-
-if ! redis-cli -h $REDIS_HOST -p $REDIS_PORT ping > /dev/null; then
-    log "ERROR: DragonflyDB is not responding"
-    exit 1
-fi
-
-STATS=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT info)
-log "Memory Usage: $(echo "$STATS" | grep used_memory_human | cut -d: -f2)"
-log "Connected Clients: $(echo "$STATS" | grep connected_clients | cut -d: -f2)"
-log "Total Commands: $(echo "$STATS" | grep total_commands_processed | cut -d: -f2)"
-log "Cache Hit Rate: $(echo "$STATS" | grep keyspace_hits | cut -d: -f2)"
-log "Cache Miss Rate: $(echo "$STATS" | grep keyspace_misses | cut -d: -f2)"
-log "Keys in DB 0: $(redis-cli -h $REDIS_HOST -p $REDIS_PORT dbsize)"
-EOF
-
-chmod +x /usr/local/bin/redis-monitor.sh
-
-# Add monitoring cron job
-log_step "Setting up Redis monitoring cron job"
-MONITOR_CRON="*/5 * * * * /usr/local/bin/redis-monitor.sh"
-(crontab -l 2>/dev/null | grep -v "redis-monitor"; echo "$MONITOR_CRON") | crontab -
-
-# Create Redis debug script
-log_step "Creating Redis debug script"
-cat > /usr/local/bin/redis-debug.sh << 'EOF'
-#!/bin/bash
-
-REDIS_HOST="127.0.0.1"
-REDIS_PORT="6379"
-
-echo "=== DragonflyDB Status ==="
-redis-cli -h $REDIS_HOST -p $REDIS_PORT info | grep -E "used_memory_human|connected_clients|total_commands|keyspace"
-
-echo -e "\n=== Redis Key Statistics ==="
-echo "Total Keys in DB 0: $(redis-cli -h $REDIS_HOST -p $REDIS_PORT dbsize)"
-
-echo -e "\n=== FreeRADIUS Redis Status ==="
-if radiusd -XC | grep -q "rlm_redis"; then
-    echo "Redis module loaded successfully"
-else
-    echo "ERROR: Redis module not loaded"
-fi
-
-echo -e "\n=== Recent FreeRADIUS Logs ==="
-tail -n 20 /var/log/freeradius/radius.log
-
-echo -e "\n=== Recent Monitoring Logs ==="
-tail -n 20 /var/log/freeradius/redis-monitor.log
-EOF
-
-chmod +x /usr/local/bin/redis-debug.sh
 
 # Enable buffered-sql site
 log_step "Enabling buffered-sql site"
 # Ensure the sites-enabled directory exists
 mkdir -p /etc/freeradius/sites-enabled || handle_error "Failed to create FreeRADIUS sites-enabled directory"
 ln -sf /etc/freeradius/sites-available/buffered-sql /etc/freeradius/sites-enabled/buffered-sql || handle_error "Failed to enable buffered-sql site"
-
-# Update default site to use Redis modules
-log_step "Configuring Redis in sites"
-DEFAULT_SITE="/etc/freeradius/sites-enabled/default"
-
-# Add rediswho to authorize section after sql (commented out)
-if [ -f "$DEFAULT_SITE" ]; then
-    sed -i '/^[[:space:]]*sql[[:space:]]*$/a\        #rediswho' "$DEFAULT_SITE" || handle_error "Failed to add rediswho to default site authorize section"
-else
-    handle_error "Default site configuration file not found"
-fi
-
-# Restart FreeRADIUS to apply Redis configuration
-log_step "Restarting FreeRADIUS to apply Redis configuration"
-systemctl restart freeradius || handle_error "Failed to restart FreeRADIUS"
-
-# Verify Redis is working
-log_step "Verifying Redis installation"
-if ! systemctl is-active --quiet dragonfly; then
-    handle_error "DragonflyDB service is not running"
-fi
-
-# Test Redis connectivity and basic operations
-if [ "$(redis-cli ping)" != "PONG" ]; then
-    handle_error "Redis is not responding to ping"
-fi
-
-# Test Redis write operation
-if [ "$(redis-cli set test_key test_value)" != "OK" ]; then
-    handle_error "Redis write operation failed"
-fi
-
-# Test Redis read operation
-TEST_VALUE=$(redis-cli get test_key)
-if [ "$TEST_VALUE" != "test_value" ]; then
-    handle_error "Redis read operation failed"
-fi
-
-# Test Redis delete operation
-if [ "$(redis-cli del test_key)" != "1" ]; then
-    handle_error "Redis delete operation failed"
-fi
-
-# Check Redis info for basic stats
-if ! redis-cli info | grep -q "redis_version"; then
-    handle_error "Unable to get Redis server information"
-fi
-
-# Clean up installation files
-log_step "Cleaning up installation files"
-rm -f dragonfly_amd64.deb || echo "Warning: Could not remove DragonflyDB installation file"
-
-echo "[$(date)] DragonflyDB installation completed successfully!"
-echo "DragonflyDB is running and configured for FreeRADIUS integration."
-echo "Redis monitoring is set up with logs at /var/log/freeradius/redis-monitor.log"
-echo "For troubleshooting, run: /usr/local/bin/redis-debug.sh"
-EOL
-
-# Make the script executable
-chmod +x /root/install_dragonfly.sh || handle_error "Failed to make DragonflyDB installation script executable"
-
-COMPLETED_STEPS+=("DragonflyDB installation script created at /root/install_dragonfly.sh")
-
-log_success "DragonflyDB installation script created at /root/install_dragonfly.sh"
-log_info "To install DragonflyDB, manually run: /root/install_dragonfly.sh"
-log_info "Note: DragonflyDB is NOT installed or started automatically."
-
-COMPLETED_STEPS+=("DragonflyDB installation script created at /root/install_dragonfly.sh")
 
 # Enable SQL module for FreeRADIUS
 log_step "Enabling SQL module"
@@ -960,7 +842,7 @@ rm -rf /etc/supervisor 2>/dev/null
 rm -rf /etc/dragonfly 2>/dev/null
 rm -rf /var/lib/dragonfly 2>/dev/null
 rm -rf /var/log/dragonfly 2>/dev/null
-rm -rf /var/run/dragonfly 2>/dev/null
+# No need to remove Redis directories as they will be managed by the package
 rm -rf /var/lib/redis 2>/dev/null
 rm -rf /var/log/redis 2>/dev/null
 rm -rf /var/log/nginx 2>/dev/null
