@@ -36,6 +36,20 @@ touch "$INSTALL_LOG" || { echo "Cannot create log file"; exit 1; }
 echo "SimpleISP Installation Log - $(date '+%Y-%m-%d %H:%M:%S')" > "$INSTALL_LOG"
 echo "----------------------------------------" >> "$INSTALL_LOG"
 
+# Check for cleanup marker file
+CLEANUP_MARKER="/root/.simpleisp_cleanup_done"
+FORCE_REINSTALL=false
+
+if [ -f "$CLEANUP_MARKER" ]; then
+    log_info "Detected previous cleanup ($(cat $CLEANUP_MARKER))"
+    log_info "Forcing reinstallation of critical directories and files"
+    FORCE_REINSTALL=true
+    
+    # Remove the marker file after handling it
+    rm -f "$CLEANUP_MARKER"
+    log_success "Cleanup marker processed and removed"
+fi
+
 # Ensure script runs as root
 log_step "Checking root privileges"
 if [ "$EUID" -ne 0 ]; then
@@ -118,33 +132,68 @@ COMPLETED_STEPS+=("System packages updated")
 
 # Install required packages
 log_step "Installing required packages"
-apt-get install -y \
-    nginx-full \
-    python3-certbot-nginx \
-    php8.2-fpm \
-    php8.2-mysql \
-    php8.2-curl \
-    php8.2-zip \
-    php8.2-common \
-    php8.2-gd \
-    php8.2-mbstring \
-    php8.2-xml \
-    git \
-    unzip \
-    curl \
-    supervisor \
-    openssl \
-    mariadb-server \
-    mariadb-client \
-    freeradius \
-    freeradius-utils \
-    freeradius-mysql \
-    freeradius-redis \
-    cron \
-    easy-rsa \
-    redis-tools \
-    golang-go \
-    software-properties-common || handle_error "Failed to install required packages"
+
+# Install packages with special handling for post-cleanup reinstallation
+if [ "$FORCE_REINSTALL" = true ]; then
+    log_info "Reinstalling packages with --force-confmiss to restore configuration files"
+    apt-get install --reinstall -y -o Dpkg::Options::="--force-confmiss" \
+        nginx-full \
+        python3-certbot-nginx \
+        php8.2-fpm \
+        php8.2-mysql \
+        php8.2-curl \
+        php8.2-zip \
+        php8.2-common \
+        php8.2-gd \
+        php8.2-mbstring \
+        php8.2-xml \
+        git \
+        unzip \
+        curl \
+        supervisor \
+        openssl \
+        mariadb-server \
+        mariadb-client \
+        freeradius \
+        freeradius-utils \
+        freeradius-mysql \
+        freeradius-redis \
+        cron \
+        easy-rsa \
+        redis-tools \
+        golang-go \
+        software-properties-common || handle_error "Failed to reinstall packages with forced configuration"
+    log_success "All packages reinstalled with configuration files restored"
+else
+    # Normal installation
+    apt-get install -y \
+        nginx-full \
+        python3-certbot-nginx \
+        php8.2-fpm \
+        php8.2-mysql \
+        php8.2-curl \
+        php8.2-zip \
+        php8.2-common \
+        php8.2-gd \
+        php8.2-mbstring \
+        php8.2-xml \
+        git \
+        unzip \
+        curl \
+        supervisor \
+        openssl \
+        mariadb-server \
+        mariadb-client \
+        freeradius \
+        freeradius-utils \
+        freeradius-mysql \
+        freeradius-redis \
+        cron \
+        easy-rsa \
+        redis-tools \
+        golang-go \
+        software-properties-common || handle_error "Failed to install required packages"
+fi
 COMPLETED_STEPS+=("Required packages installed")
 
 # Set default timezone
@@ -157,6 +206,46 @@ log_step "Setting default PHP version"
 update-alternatives --set php /usr/bin/php8.2 || handle_error "Failed to set default PHP version"
 COMPLETED_STEPS+=("PHP 8.2 set as default")
 
+# Install and configure ionCube Loader
+log_step "Installing ionCube Loader"
+
+# Get PHP extension directory
+PHP_EXT_DIR=$(php -i | grep extension_dir | awk -F '=>' '{print $2}' | xargs)
+
+# Create temp directory for download
+TMP_DIR=$(mktemp -d)
+cd "$TMP_DIR" || handle_error "Failed to create temp directory"
+
+# Download and extract ionCube Loader
+curl -L -o ioncube.zip https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.zip || handle_error "Failed to download ionCube"
+unzip ioncube.zip || handle_error "Failed to extract ionCube"
+
+# Copy loader to PHP extensions directory
+cp "ioncube/ioncube_loader_lin_8.2.so" "$PHP_EXT_DIR/" || handle_error "Failed to copy ionCube loader"
+
+# Create ionCube ini file
+cat > /etc/php/8.2/mods-available/ioncube.ini << 'EOL'
+zend_extension=ioncube_loader_lin_8.2.so
+EOL
+
+# Enable ionCube for PHP CLI and FPM
+ln -sf /etc/php/8.2/mods-available/ioncube.ini /etc/php/8.2/cli/conf.d/00-ioncube.ini || handle_error "Failed to enable ionCube for CLI"
+ln -sf /etc/php/8.2/mods-available/ioncube.ini /etc/php/8.2/fpm/conf.d/00-ioncube.ini || handle_error "Failed to enable ionCube for FPM"
+
+# Clean up
+cd - || handle_error "Failed to return to previous directory"
+rm -rf "$TMP_DIR"
+
+# Restart PHP-FPM
+systemctl restart php8.2-fpm || handle_error "Failed to restart PHP-FPM"
+
+# Verify ionCube installation
+if php -v | grep -q "ionCube PHP Loader"; then
+    COMPLETED_STEPS+=("ionCube Loader installed and activated")
+else
+    handle_error "ionCube Loader installation verification failed"
+fi
+
 # Start and enable MariaDB
 log_step "Configuring MariaDB"
 systemctl start mariadb || handle_error "Failed to start MariaDB"
@@ -165,7 +254,48 @@ COMPLETED_STEPS+=("MariaDB started and enabled")
 
 # Configure MySQL to allow remote connections
 log_step "Configuring MySQL for remote connections"
-sed -i 's/^bind-address.*$/bind-address = 0.0.0.0/' /etc/mysql/mariadb.conf.d/50-server.cnf || handle_error "Failed to update MySQL bind address"
+
+# Create MariaDB configuration directory if it doesn't exist
+mkdir -p /etc/mysql/mariadb.conf.d/
+
+# Configure MariaDB
+cat > /etc/mysql/mariadb.conf.d/50-server.cnf << 'EOL'
+[mysqld]
+user                    = mysql
+pid-file                = /run/mysqld/mysqld.pid
+socket                  = /run/mysqld/mysqld.sock
+port                    = 3306
+basedir                 = /usr
+datadir                 = /var/lib/mysql
+tmpdir                  = /tmp
+lc-messages-dir         = /usr/share/mysql
+lc-messages             = en_US
+skip-external-locking
+
+bind-address            = 0.0.0.0
+
+key_buffer_size         = 16M
+max_allowed_packet      = 16M
+thread_stack            = 192K
+thread_cache_size       = 8
+
+myisam-recover-options  = BACKUP
+
+query_cache_limit       = 1M
+query_cache_size        = 16M
+
+expire_logs_days        = 10
+max_binlog_size        = 100M
+
+character-set-server    = utf8mb4
+collation-server        = utf8mb4_general_ci
+
+[embedded]
+
+[mariadb]
+
+[mariadb-10.6]
+EOL
 
 # Restart MariaDB to apply changes
 systemctl restart mariadb || handle_error "Failed to restart MariaDB after configuration change"
@@ -214,104 +344,196 @@ if ! command -v composer &> /dev/null; then
 fi
 COMPLETED_STEPS+=("Composer installed")
 
-# Install DragonflyDB
-log_step "Installing DragonflyDB"
-wget https://dragonflydb.gateway.scarf.sh/latest/dragonfly_amd64.deb || handle_error "Failed to download DragonflyDB"
-dpkg -i dragonfly_amd64.deb || handle_error "Failed to install DragonflyDB"
-apt install -fy || handle_error "Failed to install DragonflyDB dependencies"
-COMPLETED_STEPS+=("DragonflyDB installed")
+# Configure Redis
+log_step "Configuring Redis"
 
-# Configure DragonflyDB
-log_step "Configuring DragonflyDB"
-cat > /etc/dragonfly/dragonfly.conf << 'EOL'
---pidfile=/var/run/dragonfly/dragonfly.pid
---log_dir=/var/log/dragonfly
---dir=/var/lib/dragonfly
---max_log_size=1
---version_check=true
---cache_mode=true  
---snapshot_cron=*/30 * * * * 
---maxmemory=4gb 
---keys_output_limit=12288 
---dbfilename=dump
+# Update Redis configuration
+sed -i 's/^bind 127.0.0.1/bind 0.0.0.0/' /etc/redis/redis.conf || handle_error "Failed to update Redis bind address"
+sed -i 's/^# requirepass .*/requirepass simpleisp/' /etc/redis/redis.conf || handle_error "Failed to set Redis password"
+
+# Enable and restart Redis service
+systemctl enable redis-server || handle_error "Failed to enable Redis service"
+systemctl restart redis-server || handle_error "Failed to restart Redis service"
+COMPLETED_STEPS+=("Redis configured and enabled")
+
+# Configure FreeRADIUS
+log_step "Configuring FreeRADIUS"
+SQL_FILE="/etc/freeradius/mods-available/sql"
+if [ -f "$SQL_FILE" ]; then
+    # Configure SQL driver and dialect
+    sed -i 's/[# ]*driver = "rlm_sql_null"/        driver = "rlm_sql_mysql"/' "$SQL_FILE" || handle_error "Failed to update driver in FreeRADIUS SQL configuration"
+    sed -i 's/[# ]*dialect = "mysql"/        dialect = "mysql"/' "$SQL_FILE" || handle_error "Failed to update dialect in FreeRADIUS SQL configuration"
+
+    # Update only the connection info section
+    sed -i 's/^#*[[:space:]]*server[[:space:]]*=.*$/        server = "localhost"/' "$SQL_FILE" || handle_error "Failed to update server in FreeRADIUS SQL configuration"
+    sed -i 's/^#*[[:space:]]*port[[:space:]]*=.*$/        port = 3306/' "$SQL_FILE" || handle_error "Failed to update port in FreeRADIUS SQL configuration"
+    sed -i "s/^#*[[:space:]]*login[[:space:]]*=.*$/        login = \"$MYSQL_USER\"/'" "$SQL_FILE" || handle_error "Failed to update login in FreeRADIUS SQL configuration"
+    sed -i "s/^#*[[:space:]]*password[[:space:]]*=.*$/        password = \"$MYSQL_PASSWORD\"/'" "$SQL_FILE" || handle_error "Failed to update password in FreeRADIUS SQL configuration"
+    sed -i "s/^#*[[:space:]]*radius_db[[:space:]]*=.*$/        radius_db = \"$MYSQL_DATABASE\"/'" "$SQL_FILE" || handle_error "Failed to update radius_db in FreeRADIUS SQL configuration"
+
+    # Comment out TLS configuration
+    sed -i '/mysql {/,/^[[:space:]]*}$/c\mysql {\n        # TLS configuration commented out' "$SQL_FILE" || handle_error "Failed to comment out TLS configuration in FreeRADIUS SQL configuration"
+
+    # Uncomment client_table
+    sed -i 's/[# ]*client_table = "nas"/        client_table = "nas"/' "$SQL_FILE" || handle_error "Failed to uncomment client_table in FreeRADIUS SQL configuration"
+
+    # Enable SQL module in FreeRADIUS
+    ln -sf /etc/freeradius/mods-available/sql /etc/freeradius/mods-enabled/ || handle_error "Failed to enable SQL module in FreeRADIUS"
+fi
+COMPLETED_STEPS+=("FreeRADIUS modules configured")
+
+# Configure FreeRADIUS default site
+log_step "Configuring FreeRADIUS default site"
+DEFAULT_SITE="/etc/freeradius/sites-enabled/default"
+if [ -f "$DEFAULT_SITE" ]; then
+    # Change -sql to sql
+    sed -i 's/-sql/sql/g' "$DEFAULT_SITE" || handle_error "Failed to update -sql to sql in FreeRADIUS default site configuration"
+
+    # Comment out detail line
+    sed -i 's/^[[:space:]]*detail/#       detail/' "$DEFAULT_SITE" || handle_error "Failed to comment out detail line in FreeRADIUS default site configuration"
+fi
+COMPLETED_STEPS+=("FreeRADIUS default site configured")
+
+# Restart services
+log_step "Restarting services"
+systemctl restart mariadb || handle_error "Failed to restart MariaDB"
+systemctl restart freeradius || handle_error "Failed to restart FreeRADIUS"
+COMPLETED_STEPS+=("Services restarted")
+
+# Test FreeRADIUS configuration
+log_step "Testing FreeRADIUS configuration"
+if ! freeradius -XC 2>&1 | grep -q "Configuration appears to be OK"; then
+    handle_error "FreeRADIUS configuration test failed"
+fi
+COMPLETED_STEPS+=("FreeRADIUS configuration tested")
+
+# Optimize RADIUS database indexes
+log_step "Optimizing RADIUS database indexes"
+cat > /tmp/radius_optimize.sql << EOL
+USE radius;
+
+-- Add indexes to improve query performance
+
+-- radcheck
+ALTER TABLE radcheck
+  ADD INDEX idx_username (username),
+  ADD INDEX idx_attribute (attribute);
+ANALYZE TABLE radcheck;
+
+-- radreply
+ALTER TABLE radreply
+  ADD INDEX idx_username (username),
+  ADD INDEX idx_attribute (attribute);
+ANALYZE TABLE radreply;
+
+-- radusergroup
+ALTER TABLE radusergroup
+  ADD INDEX idx_username (username),
+  ADD INDEX idx_groupname (groupname);
+ANALYZE TABLE radusergroup;
+
+-- radgroupcheck
+ALTER TABLE radgroupcheck
+  ADD INDEX idx_groupname (groupname),
+  ADD INDEX idx_attribute (attribute);
+ANALYZE TABLE radgroupcheck;
+
+-- radgroupreply
+ALTER TABLE radgroupreply
+  ADD INDEX idx_groupname (groupname),
+  ADD INDEX idx_attribute (attribute);
+ANALYZE TABLE radgroupreply;
+
+-- radacct (very critical for performance)
+ALTER TABLE radacct
+  ADD INDEX idx_username (username),
+  ADD INDEX idx_acctsessionid (acctsessionid),
+  ADD INDEX idx_framedipaddress (framedipaddress),
+  ADD INDEX idx_acctstarttime (acctstarttime),
+  ADD INDEX idx_acctstoptime (acctstoptime),
+  ADD INDEX idx_nasipaddress (nasipaddress),
+  ADD INDEX idx_calledstationid (calledstationid),
+  ADD INDEX idx_callingstationid (callingstationid);
+ANALYZE TABLE radacct;
+
+-- radpostauth
+ALTER TABLE radpostauth
+  ADD INDEX idx_username (username),
+  ADD INDEX idx_reply (reply),
+  ADD INDEX idx_authdate (authdate);
+ANALYZE TABLE radpostauth;
+
+-- hotspot_sessions
+ALTER TABLE hotspot_sessions
+  ADD INDEX idx_payment_voucher (payment_id, voucher);
+ANALYZE TABLE hotspot_sessions;
+
+-- Convert tables to InnoDB and utf8mb4 (recommended for reliability and Unicode support)
+ALTER TABLE radcheck ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE radreply ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE radusergroup ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE radgroupcheck ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE radgroupreply ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE radacct ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE radpostauth ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE hotspot_sessions ENGINE=InnoDB, CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- Analyze again after engine/charset conversion
+ANALYZE TABLE radcheck;
+ANALYZE TABLE radreply;
+ANALYZE TABLE radusergroup;
+ANALYZE TABLE radgroupcheck;
+ANALYZE TABLE radgroupreply;
+ANALYZE TABLE radacct;
+ANALYZE TABLE radpostauth;
+ANALYZE TABLE hotspot_sessions;
+
 EOL
 
-chown dfly:dfly /etc/dragonfly/dragonfly.conf || handle_error "Failed to set DragonflyDB config permissions"
+mysql -u root < /tmp/radius_optimize.sql || handle_error "Failed to optimize RADIUS database indexes"
+rm -f /tmp/radius_optimize.sql
+COMPLETED_STEPS+=("RADIUS database indexes optimized")
+# Configure Supervisor for queue worker
+log_step "Configuring Supervisor for queue worker"
+cat > /etc/supervisor/conf.d/queue-worker.conf << EOL
+[program:queue-worker]
+process_name=%(program_name)s_%(process_num)02d
+command=php /var/www/html/artisan queue:work --tries=3
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user=www-data
+numprocs=5
+redirect_stderr=true
+stdout_logfile=/var/www/html/storage/logs/queue-worker.log
+EOL
+COMPLETED_STEPS+=("Supervisor configured for queue worker")
 
-# Setup DragonflyDB service
-# Default is to not enable the service (0=off, 1=on)
-ENABLE_DRAGONFLY=0
-log_info "DragonflyDB auto-start is set to: $([ "$ENABLE_DRAGONFLY" -eq 1 ] && echo "ON" || echo "OFF")"
+# Install OpenVPN based on Ubuntu version
+log_step "Installing OpenVPN"
+case $UBUNTU_VERSION in
+    "focal"|"jammy"|"noble")
+        echo "Installing OpenVPN for Ubuntu $UBUNTU_VERSION"
+        export AUTO_INSTALL=y
+        curl -O https://raw.githubusercontent.com/simpleisp/bash/main/openvpn.sh || handle_error "Failed to download OpenVPN installer"
+        chmod +x openvpn.sh || handle_error "Failed to make OpenVPN installer executable"
+        ./openvpn.sh || handle_error "Failed to install OpenVPN"
 
-# Always start the service for this session
-systemctl start dragonfly.service || handle_error "Failed to start DragonflyDB"
+        # Enable and start OpenVPN service
+        systemctl enable openvpn || handle_error "Failed to enable OpenVPN service"
+        systemctl start openvpn || handle_error "Failed to start OpenVPN service"
 
-# Only enable the service if flag is set to 1
-if [ "$ENABLE_DRAGONFLY" -eq 1 ]; then
-    systemctl enable dragonfly.service || handle_error "Failed to enable DragonflyDB"
-    log_success "DragonflyDB service enabled to start on boot"
-else
-    systemctl disable dragonfly.service || log_info "DragonflyDB service will not start on boot"
-    log_success "DragonflyDB started for this session only (not enabled on boot)"
-fi
-COMPLETED_STEPS+=("DragonflyDB configured")
-
-# Configure Redis modules for FreeRADIUS
-log_step "Configuring Redis modules"
-
-# Configure Redis module
-if [ -f "/etc/freeradius/mods-available/redis" ]; then
-    # Add db = 0 after port configuration
-    sed -i '/^[[:space:]]*port[[:space:]]*=.*/ a\        db = 0' /etc/freeradius/mods-available/redis
-else
-    handle_error "Redis module configuration file not found"
-fi
-
-# Enable modules
-log_step "Enabling modules"
-ln -sf /etc/freeradius/mods-available/redis /etc/freeradius/mods-enabled/ || handle_error "Failed to enable Redis module"
-ln -sf /etc/freeradius/mods-available/rediswho /etc/freeradius/mods-enabled/ || handle_error "Failed to enable RedisWho module"
-ln -sf /etc/freeradius/mods-available/sql /etc/freeradius/mods-enabled/ || handle_error "Failed to enable SQL module"
-COMPLETED_STEPS+=("Freeradius Modules Enabled")
-
-# Setup Redis monitoring
-log_step "Setting up Redis monitoring"
-
-# Create monitoring directory
-mkdir -p /var/log/freeradius || handle_error "Failed to create monitoring directory"
-
-# Create Redis monitoring script
-cat > /usr/local/bin/redis-monitor.sh << 'EOF'
-#!/bin/bash
-
-REDIS_HOST="127.0.0.1"
-REDIS_PORT="6379"
-LOG_FILE="/var/log/freeradius/redis-monitor.log"
-
-log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
-}
-
-if ! redis-cli -h $REDIS_HOST -p $REDIS_PORT ping > /dev/null; then
-    log "ERROR: DragonflyDB is not responding"
-    exit 1
-fi
-
-STATS=$(redis-cli -h $REDIS_HOST -p $REDIS_PORT info)
-log "Memory Usage: $(echo "$STATS" | grep used_memory_human | cut -d: -f2)"
-log "Connected Clients: $(echo "$STATS" | grep connected_clients | cut -d: -f2)"
-log "Total Commands: $(echo "$STATS" | grep total_commands_processed | cut -d: -f2)"
-log "Cache Hit Rate: $(echo "$STATS" | grep keyspace_hits | cut -d: -f2)"
-log "Cache Miss Rate: $(echo "$STATS" | grep keyspace_misses | cut -d: -f2)"
-log "Keys in DB 0: $(redis-cli -h $REDIS_HOST -p $REDIS_PORT dbsize)"
-EOF
-
-chmod +x /usr/local/bin/redis-monitor.sh
-
-# Add monitoring cron job
-log_step "Setting up Redis monitoring cron job"
-MONITOR_CRON="*/5 * * * * /usr/local/bin/redis-monitor.sh"
-(crontab -l 2>/dev/null | grep -v "redis-monitor"; echo "$MONITOR_CRON") | crontab -
+        # Set more secure permissions for OpenVPN
+        chown -R root:root /etc/openvpn || handle_error "Failed to set ownership of OpenVPN configuration directory"
+        chmod -R 750 /etc/openvpn || handle_error "Failed to set permissions of OpenVPN configuration directory"
+        chmod -R 700 /etc/openvpn/easy-rsa || handle_error "Failed to set permissions of OpenVPN easy-rsa directory"
+        ;;
+    *)
+        handle_error "Unsupported Ubuntu version for OpenVPN installation"
+        ;;
+esac
+COMPLETED_STEPS+=("OpenVPN installed and configured")
 
 # Create Redis debug script
 log_step "Creating Redis debug script"
@@ -344,6 +566,153 @@ EOF
 chmod +x /usr/local/bin/redis-debug.sh
 
 COMPLETED_STEPS+=("Redis monitoring configured")
+
+# Configure Nginx
+log_step "Configuring Nginx"
+cat > /etc/nginx/sites-available/default << 'EOL'
+server {
+    listen 80;
+    listen [::]:80;
+
+    root /var/www/html/public;
+    index index.php index.html index.htm index.nginx-debian.html;
+
+    server_name $DOMAIN;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/var/run/php/php8.2-fpm.sock;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOL
+COMPLETED_STEPS+=("Nginx configured")
+
+# Test the Nginx configuration
+log_step "Testing Nginx configuration"
+nginx -t || handle_error "Failed to test Nginx configuration"
+COMPLETED_STEPS+=("Nginx configuration tested")
+
+# If the configuration is OK, reload and restart Nginx
+log_step "Reloading and restarting Nginx"
+systemctl reload nginx || handle_error "Failed to reload Nginx"
+systemctl restart nginx || handle_error "Failed to restart Nginx"
+COMPLETED_STEPS+=("Nginx reloaded and restarted")
+
+# Set correct permissions
+log_step "Setting correct permissions"
+chown -R www-data:www-data /var/www/html || handle_error "Failed to set ownership of web root"
+chmod -R 775 /var/www/html/storage || handle_error "Failed to set permissions of storage directory"
+chmod -R 775 /var/www/html/bootstrap/cache || handle_error "Failed to set permissions of cache directory"
+COMPLETED_STEPS+=("Correct permissions set")
+
+# Install cron
+log_step "Installing cron"
+# Write cron job entry to a temporary file
+echo "* * * * * php /var/www/html/artisan schedule:run >> /dev/null 2>&1" > cronjob || handle_error "Failed to write cron job to temporary file"
+
+# Install the cron job from the temporary file
+crontab cronjob || handle_error "Failed to install cron job"
+COMPLETED_STEPS+=("Cron job installed")
+
+# Clean up the temporary file
+rm cronjob || handle_error "Failed to remove temporary cron job file"
+COMPLETED_STEPS+=("Temporary cron job file removed")
+
+# Update sudoers for www-data user
+log_step "Updating sudoers for www-data user"
+cat >> /etc/sudoers << 'EOL'
+www-data ALL=NOPASSWD: /bin/systemctl start openvpn
+www-data ALL=NOPASSWD: /bin/systemctl stop openvpn
+www-data ALL=NOPASSWD: /bin/systemctl restart openvpn
+www-data ALL=NOPASSWD: /bin/systemctl status openvpn
+www-data ALL=NOPASSWD: /bin/systemctl reload openvpn
+www-data ALL=NOPASSWD: /bin/systemctl enable openvpn
+www-data ALL=NOPASSWD: /bin/systemctl disable openvpn
+www-data ALL=NOPASSWD: /bin/systemctl start freeradius
+www-data ALL=NOPASSWD: /bin/systemctl stop freeradius
+www-data ALL=NOPASSWD: /bin/systemctl restart freeradius
+www-data ALL=NOPASSWD: /bin/systemctl status freeradius
+www-data ALL=NOPASSWD: /bin/systemctl reload freeradius
+www-data ALL=NOPASSWD: /bin/systemctl enable freeradius
+www-data ALL=NOPASSWD: /bin/systemctl disable freeradius
+www-data ALL=NOPASSWD: /bin/supervisorctl stop all
+www-data ALL=NOPASSWD: /bin/supervisorctl reread
+www-data ALL=NOPASSWD: /bin/supervisorctl update
+www-data ALL=NOPASSWD: /bin/supervisorctl start all
+www-data ALL=NOPASSWD: /bin/supervisorctl restart all
+www-data ALL=NOPASSWD: /bin/supervisorctl status
+www-data ALL=NOPASSWD: /bin/systemctl restart supervisor
+www-data ALL=NOPASSWD: /bin/systemctl status ssh
+www-data ALL=NOPASSWD: /var/www/html/sh/set_permissions.sh
+www-data ALL=NOPASSWD: /var/www/html/sh/restart-services.sh
+EOL
+COMPLETED_STEPS+=("Sudoers updated for www-data user")
+
+# Save database credentials
+log_step "Saving database credentials"
+echo "MySQL Credentials:" > "$DB_CREDENTIALS_FILE" || handle_error "Failed to write database credentials to file"
+echo "DB_HOST=localhost" >> "$DB_CREDENTIALS_FILE" || handle_error "Failed to write database credentials to file"
+echo "DB_PORT=3306" >> "$DB_CREDENTIALS_FILE" || handle_error "Failed to write database credentials to file"
+echo "DB_DATABASE=$MYSQL_DATABASE" >> "$DB_CREDENTIALS_FILE" || handle_error "Failed to write database credentials to file"
+echo "DB_USERNAME=$MYSQL_USER" >> "$DB_CREDENTIALS_FILE" || handle_error "Failed to write database credentials to file"
+echo "DB_PASSWORD=$MYSQL_PASSWORD" >> "$DB_CREDENTIALS_FILE" || handle_error "Failed to write database credentials to file"
+COMPLETED_STEPS+=("Database credentials saved")
+
+# Start and enable all services
+log_step "Starting and enabling all services"
+systemctl start nginx || handle_error "Failed to start Nginx"
+systemctl enable nginx || handle_error "Failed to enable Nginx"
+systemctl start php8.2-fpm || handle_error "Failed to start PHP 8.2 FPM"
+systemctl enable php8.2-fpm || handle_error "Failed to enable PHP 8.2 FPM"
+systemctl start supervisor || handle_error "Failed to start Supervisor"
+systemctl enable supervisor || handle_error "Failed to enable Supervisor"
+systemctl start freeradius || handle_error "Failed to start FreeRADIUS"
+systemctl enable freeradius || handle_error "Failed to enable FreeRADIUS"
+systemctl start openvpn || handle_error "Failed to start OpenVPN"
+systemctl enable openvpn || handle_error "Failed to enable OpenVPN"
+COMPLETED_STEPS+=("All services started and enabled")
+
+# Restart all services to ensure proper configuration
+log_step "Restarting all services"
+systemctl restart nginx || handle_error "Failed to restart Nginx"
+systemctl restart php8.2-fpm || handle_error "Failed to restart PHP 8.2 FPM"
+systemctl restart supervisor || handle_error "Failed to restart Supervisor"
+systemctl restart freeradius || handle_error "Failed to restart FreeRADIUS"
+systemctl restart openvpn || handle_error "Failed to restart OpenVPN"
+COMPLETED_STEPS+=("All services restarted")
+
+# Open Firewall Ports and enable ufw
+log_step "Opening firewall ports and enabling ufw"
+ufw allow ssh || handle_error "Failed to allow SSH through firewall"
+ufw allow 9080/tcp || handle_error "Failed to allow port 9080 through firewall"
+ufw allow http || handle_error "Failed to allow HTTP through firewall"
+ufw allow https || handle_error "Failed to allow HTTPS through firewall"
+ufw allow 1194/tcp || handle_error "Failed to allow OpenVPN through firewall"
+ufw allow 1812:1813/udp || handle_error "Failed to allow FreeRADIUS through firewall"
+ufw reload || handle_error "Failed to reload firewall rules"
+yes | ufw enable || handle_error "Failed to enable firewall"
+COMPLETED_STEPS+=("Firewall ports opened and ufw enabled")
+
+# Configure SSL with Certbot
+log_step "Configuring SSL with Certbot"
+echo "Configuring SSL certificate for $DOMAIN"
+certbot --nginx -d "$DOMAIN" --agree-tos --email "$EMAIL_ADDRESS" --no-eff-email --non-interactive --redirect || handle_error "Failed to configure SSL with Certbot"
+COMPLETED_STEPS+=("SSL configured with Certbot")
+
+# Add monitoring cron job
+log_step "Adding monitoring cron job"
+echo "*/5 * * * * /usr/local/bin/redis-debug.sh" > cronjob || handle_error "Failed to write monitoring cron job to temporary file"
+crontab cronjob || handle_error "Failed to install monitoring cron job"
+rm cronjob || handle_error "Failed to remove temporary monitoring cron job file"
+COMPLETED_STEPS+=("Monitoring cron job added")
 
 # Enable buffered-sql site
 ln -sf /etc/freeradius/sites-available/buffered-sql /etc/freeradius/sites-enabled/ || handle_error "Failed to enable buffered-sql site"
@@ -727,6 +1096,54 @@ systemctl enable freeradius || handle_error "Failed to enable FreeRADIUS"
 systemctl start openvpn || handle_error "Failed to start OpenVPN"
 systemctl enable openvpn || handle_error "Failed to enable OpenVPN"
 COMPLETED_STEPS+=("All services started and enabled")
+
+# Define cleanup function
+cleanup() {
+    log_step "Starting cleanup process"
+    
+    # Stop services
+    systemctl stop nginx freeradius mariadb redis-server php8.2-fpm || echo "Could not stop all services"
+    
+    # Remove web files
+    rm -rf /var/www/html/* 2>/dev/null
+    rm -rf /var/www/html/.* 2>/dev/null
+    
+    # Remove FreeRADIUS configuration
+    rm -rf /etc/freeradius/* 2>/dev/null
+    rm -rf /etc/freeradius/.* 2>/dev/null
+    
+    # Remove Redis data
+    rm -rf /var/lib/redis/* 2>/dev/null
+    rm -rf /var/lib/redis/.* 2>/dev/null
+    
+    # Remove MySQL/MariaDB data
+    mysql -e "DROP USER IF EXISTS 'simpleisp'@'%';" 2>/dev/null || echo "Could not remove simpleisp user"
+    mysql -e "DROP USER IF EXISTS 'radius'@'%';" 2>/dev/null || echo "Could not remove radius user"
+    mysql -e "FLUSH PRIVILEGES;" 2>/dev/null
+    
+    # Remove MySQL/MariaDB files
+    rm -rf /var/lib/mysql/* 2>/dev/null
+    rm -rf /var/lib/mysql/.* 2>/dev/null
+    rm -rf /run/mysqld 2>/dev/null
+    rm -f /root/.my.cnf 2>/dev/null
+    rm -f /root/.mysql_history 2>/dev/null
+    
+    # Remove any remaining MySQL/MariaDB files
+    find /etc/mysql/ -type f -delete 2>/dev/null
+    find /etc/mysql/ -type l -delete 2>/dev/null
+    
+    # Create cleanup marker
+    date '+%Y-%m-%d %H:%M:%S' > "$CLEANUP_MARKER"
+    log_success "Cleanup completed. Marker created at $CLEANUP_MARKER"
+    
+    # Exit with success
+    exit 0
+}
+
+# Handle cleanup argument
+if [ "$1" = "--cleanup" ]; then
+    cleanup
+fi
 
 # Restart all services to ensure proper configuration
 log_step "Restarting all services"
