@@ -290,6 +290,13 @@ max_binlog_size        = 100M
 character-set-server    = utf8mb4
 collation-server        = utf8mb4_general_ci
 
+# Performance optimizations
+innodb_buffer_pool_size = 1G
+innodb_log_file_size = 256M
+innodb_flush_method = O_DIRECT
+innodb_flush_log_at_trx_commit = 2
+innodb_file_per_table = 1
+
 [embedded]
 
 [mariadb]
@@ -376,23 +383,20 @@ if [ -f "$SQL_FILE" ]; then
 
     # Uncomment client_table
     sed -i 's/[# ]*client_table = "nas"/        client_table = "nas"/' "$SQL_FILE" || handle_error "Failed to uncomment client_table in FreeRADIUS SQL configuration"
-
-    # Enable SQL module in FreeRADIUS
-    ln -sf /etc/freeradius/mods-available/sql /etc/freeradius/mods-enabled/ || handle_error "Failed to enable SQL module in FreeRADIUS"
 fi
-COMPLETED_STEPS+=("FreeRADIUS modules configured")
+COMPLETED_STEPS+=("FreeRADIUS SQL module configured")
 
-# Configure FreeRADIUS default site
-log_step "Configuring FreeRADIUS default site"
-DEFAULT_SITE="/etc/freeradius/sites-enabled/default"
-if [ -f "$DEFAULT_SITE" ]; then
-    # Change -sql to sql
-    sed -i 's/-sql/sql/g' "$DEFAULT_SITE" || handle_error "Failed to update -sql to sql in FreeRADIUS default site configuration"
+# Enable buffered-sql site
+log_step "Enabling buffered-sql site"
+# Ensure the sites-enabled directory exists
+mkdir -p /etc/freeradius/sites-enabled || handle_error "Failed to create FreeRADIUS sites-enabled directory"
+ln -sf /etc/freeradius/sites-available/buffered-sql /etc/freeradius/sites-enabled/buffered-sql || handle_error "Failed to enable buffered-sql site"
 
-    # Comment out detail line
-    sed -i 's/^[[:space:]]*detail/#       detail/' "$DEFAULT_SITE" || handle_error "Failed to comment out detail line in FreeRADIUS default site configuration"
-fi
-COMPLETED_STEPS+=("FreeRADIUS default site configured")
+# Enable SQL module for FreeRADIUS
+log_step "Enabling SQL module"
+# Ensure the mods-enabled directory exists
+mkdir -p /etc/freeradius/mods-enabled || handle_error "Failed to create FreeRADIUS mods-enabled directory"
+ln -sf /etc/freeradius/mods-available/sql /etc/freeradius/mods-enabled/sql || handle_error "Failed to enable SQL module"
 
 # Restart services
 log_step "Restarting services"
@@ -750,6 +754,7 @@ sed -i "s|DB_DATABASE=.*|DB_DATABASE=$MYSQL_DATABASE|" .env || handle_error "Fai
 sed -i "s|DB_USERNAME=.*|DB_USERNAME=$MYSQL_USER|" .env || handle_error "Failed to update DB_USERNAME in .env"
 sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$MYSQL_PASSWORD|" .env || handle_error "Failed to update DB_PASSWORD in .env"
 sed -i "s|APP_URL=.*|APP_URL=https://$DOMAIN|" .env || handle_error "Failed to update APP_URL in .env"
+sed -i "s|APP_NAME=.*|APP_NAME=\"$DOMAIN\"|" .env || handle_error "Failed to update APP_NAME in .env"
 COMPLETED_STEPS+=(".env file updated with database credentials")
 
 # Configure FreeRADIUS
@@ -979,7 +984,7 @@ case $UBUNTU_VERSION in
         chmod -R 700 /etc/openvpn/easy-rsa || handle_error "Failed to set permissions of OpenVPN easy-rsa directory"
         ;;
     *)
-        handle_error "Unsupported Ubuntu version for OpenVPN installation: $UBUNTU_VERSION"
+        handle_error "Unsupported Ubuntu version for OpenVPN installation"
         ;;
 esac
 COMPLETED_STEPS+=("OpenVPN installed")
@@ -1097,28 +1102,59 @@ systemctl start openvpn || handle_error "Failed to start OpenVPN"
 systemctl enable openvpn || handle_error "Failed to enable OpenVPN"
 COMPLETED_STEPS+=("All services started and enabled")
 
+# Restart all services to ensure proper configuration
+log_step "Restarting all services"
+systemctl restart nginx || handle_error "Failed to restart Nginx"
+systemctl restart php8.2-fpm || handle_error "Failed to restart PHP 8.2 FPM"
+systemctl restart supervisor || handle_error "Failed to restart Supervisor"
+systemctl restart freeradius || handle_error "Failed to restart FreeRADIUS"
+systemctl restart openvpn || handle_error "Failed to restart OpenVPN"
+COMPLETED_STEPS+=("All services restarted")
+
+# Open Firewall Ports and enable ufw
+log_step "Opening firewall ports and enabling ufw"
+ufw allow ssh || handle_error "Failed to allow SSH through firewall"
+ufw allow 9080/tcp || handle_error "Failed to allow port 9080 through firewall"
+ufw allow http || handle_error "Failed to allow HTTP through firewall"
+ufw allow https || handle_error "Failed to allow HTTPS through firewall"
+ufw allow 1194/tcp || handle_error "Failed to allow OpenVPN through firewall"
+ufw allow 1812:1813/udp || handle_error "Failed to allow FreeRADIUS through firewall"
+ufw reload || handle_error "Failed to reload firewall rules"
+yes | ufw enable || handle_error "Failed to enable firewall"
+COMPLETED_STEPS+=("Firewall ports opened and ufw enabled")
+
+# Configure SSL with Certbot
+log_step "Configuring SSL with Certbot"
+echo "Configuring SSL certificate for $DOMAIN"
+certbot --nginx -d "$DOMAIN" --agree-tos --email "$EMAIL_ADDRESS" --no-eff-email --non-interactive --redirect || handle_error "Failed to configure SSL with Certbot"
+COMPLETED_STEPS+=("SSL configured with Certbot")
+
 # Define cleanup function
 cleanup() {
     log_step "Starting cleanup process"
     
     # Stop services
-    systemctl stop nginx freeradius mariadb redis-server php8.2-fpm || echo "Could not stop all services"
+    systemctl stop nginx freeradius mariadb redis-server php8.2-fpm supervisor openvpn || echo "Could not stop all services"
     
     # Remove web files
     rm -rf /var/www/html/* 2>/dev/null
     rm -rf /var/www/html/.* 2>/dev/null
     
-    # Remove FreeRADIUS configuration
-    rm -rf /etc/freeradius/* 2>/dev/null
-    rm -rf /etc/freeradius/.* 2>/dev/null
+    # Remove configuration directories
+    rm -rf /etc/nginx/sites-available/default 2>/dev/null
+    rm -rf /etc/nginx/sites-enabled/default 2>/dev/null
+    rm -rf /etc/freeradius 2>/dev/null
+    rm -rf /etc/openvpn 2>/dev/null
+    rm -rf /etc/supervisor 2>/dev/null
     
     # Remove Redis data
     rm -rf /var/lib/redis/* 2>/dev/null
     rm -rf /var/lib/redis/.* 2>/dev/null
     
-    # Remove MySQL/MariaDB data
+    # Remove MySQL/MariaDB data and users
     mysql -e "DROP USER IF EXISTS 'simpleisp'@'%';" 2>/dev/null || echo "Could not remove simpleisp user"
     mysql -e "DROP USER IF EXISTS 'radius'@'%';" 2>/dev/null || echo "Could not remove radius user"
+    mysql -e "DROP DATABASE IF EXISTS radius;" 2>/dev/null || echo "Could not remove radius database"
     mysql -e "FLUSH PRIVILEGES;" 2>/dev/null
     
     # Remove MySQL/MariaDB files
@@ -1131,6 +1167,20 @@ cleanup() {
     # Remove any remaining MySQL/MariaDB files
     find /etc/mysql/ -type f -delete 2>/dev/null
     find /etc/mysql/ -type l -delete 2>/dev/null
+    
+    # Remove log files
+    rm -f /var/log/nginx/access.log 2>/dev/null
+    rm -f /var/log/nginx/error.log 2>/dev/null
+    rm -f /var/log/freeradius/radius.log 2>/dev/null
+    
+    # Remove SSL certificates
+    rm -rf /etc/letsencrypt/live/* 2>/dev/null
+    rm -rf /etc/letsencrypt/archive/* 2>/dev/null
+    rm -rf /etc/letsencrypt/renewal/* 2>/dev/null
+    
+    # Remove application-specific files
+    rm -f /home/sisp/db.txt 2>/dev/null
+    rm -f /etc/cron.d/laravel-scheduler 2>/dev/null
     
     # Create cleanup marker
     date '+%Y-%m-%d %H:%M:%S' > "$CLEANUP_MARKER"
