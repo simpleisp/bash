@@ -547,8 +547,8 @@ cat > /usr/local/bin/redis-debug.sh << 'EOF'
 REDIS_HOST="127.0.0.1"
 REDIS_PORT="6379"
 
-echo "=== DragonflyDB Status ==="
-redis-cli -h $REDIS_HOST -p $REDIS_PORT info | grep -E "used_memory_human|connected_clients|total_commands|keyspace"
+echo "=== Redis Status ==="
+systemctl status redis-server --no-pager -l
 
 echo -e "\n=== Redis Key Statistics ==="
 echo "Total Keys in DB 0: $(redis-cli -h $REDIS_HOST -p $REDIS_PORT dbsize)"
@@ -809,14 +809,13 @@ COMPLETED_STEPS+=("FreeRADIUS default site configured")
 
 # Restart services
 log_step "Restarting services"
-systemctl restart dragonfly || handle_error "Failed to restart DragonflyDB"
 systemctl restart freeradius || handle_error "Failed to restart FreeRADIUS"
 COMPLETED_STEPS+=("Services restarted")
 
 # Verify Redis is working
 log_step "Verifying Redis installation"
-if ! systemctl is-active --quiet dragonfly; then
-    handle_error "DragonflyDB service is not running"
+if ! systemctl is-active --quiet redis-server; then
+    handle_error "Redis service is not running"
 fi
 
 # Test Redis connectivity and basic operations
