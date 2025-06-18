@@ -776,7 +776,7 @@ fi
 
 # Stop and disable all services
 log_step "Stopping and disabling services"
-services=("nginx" "php7.4-fpm" "php8.2-fpm" "supervisor" "freeradius" "openvpn" "mariadb" "redis-server" "dragonfly")
+services=("nginx" "php7.4-fpm" "php8.2-fpm" "supervisor" "freeradius" "openvpn" "mariadb" "redis-server")
 for service in "${services[@]}"; do
     systemctl stop $service 2>/dev/null || echo "Service $service not running or not found"
     systemctl disable $service 2>/dev/null || echo "Service $service could not be disabled or not found"
@@ -825,7 +825,7 @@ php7.4 php7.4-fpm php7.4-common php7.4-mysql php7.4-cli php7.4-curl php7.4-json 
 php8.2 php8.2-fpm php8.2-common php8.2-mysql php8.2-cli php8.2-curl php8.2-mbstring php8.2-xml php8.2-zip php8.2-gd php8.2-intl \
 freeradius freeradius-mysql freeradius-utils freeradius-redis \
 supervisor certbot python3-certbot-nginx openvpn easy-rsa \
-dragonfly git unzip curl redis-tools golang-go software-properties-common 2>/dev/null || echo "Some packages could not be purged"
+git unzip curl redis-tools golang-go software-properties-common 2>/dev/null || echo "Some packages could not be purged"
 
 # Remove PPAs and repositories
 log_step "Removing PPAs and repositories"
@@ -849,10 +849,6 @@ rm -rf /etc/php 2>/dev/null
 rm -rf /etc/freeradius 2>/dev/null
 rm -rf /etc/openvpn 2>/dev/null
 rm -rf /etc/supervisor 2>/dev/null
-rm -rf /etc/dragonfly 2>/dev/null
-rm -rf /var/lib/dragonfly 2>/dev/null
-rm -rf /var/log/dragonfly 2>/dev/null
-# No need to remove Redis directories as they will be managed by the package
 rm -rf /var/lib/redis 2>/dev/null
 rm -rf /var/log/redis 2>/dev/null
 rm -rf /var/log/nginx 2>/dev/null
@@ -863,7 +859,7 @@ rm -rf /var/log/supervisor 2>/dev/null
 log_step "Removing installation files"
 rm -f /root/install.txt 2>/dev/null
 rm -f /root/db_credentials.txt 2>/dev/null
-rm -f /root/install_dragonfly.sh 2>/dev/null
+rm -f /root/install_openvpn.sh 2>/dev/null
 rm -f /home/sisp/db.txt 2>/dev/null
 
 # Reset firewall rules
