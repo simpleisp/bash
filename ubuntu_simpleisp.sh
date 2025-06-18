@@ -157,6 +157,7 @@ if [ "$FORCE_REINSTALL" = true ]; then
         freeradius \
         freeradius-utils \
         freeradius-mysql \
+        freeradius-redis \
         cron \
         redis-server \
         redis-tools \
@@ -187,6 +188,7 @@ else
         freeradius \
         freeradius-utils \
         freeradius-mysql \
+        freeradius-redis \
         cron \
         redis-server \
         redis-tools \
@@ -351,10 +353,17 @@ if ! command -v composer &> /dev/null; then
 fi
 COMPLETED_STEPS+=("Composer installed")
 
-# Enable Redis service
+# Configure Redis
+log_step "Configuring Redis"
+
+# Update Redis configuration
+sed -i 's/^bind 127.0.0.1/bind 0.0.0.0/' /etc/redis/redis.conf || handle_error "Failed to update Redis bind address"
+sed -i 's/^# requirepass .*/requirepass simpleisp/' /etc/redis/redis.conf || handle_error "Failed to set Redis password"
+
+# Enable and restart Redis service
 systemctl enable redis-server || handle_error "Failed to enable Redis service"
-systemctl start redis-server || handle_error "Failed to start Redis service"
-COMPLETED_STEPS+=("Redis Server enabled")
+systemctl restart redis-server || handle_error "Failed to restart Redis service"
+COMPLETED_STEPS+=("Redis configured and enabled")
 
 
 # Enable buffered-sql site
@@ -401,6 +410,7 @@ sed -i "s|DB_DATABASE=.*|DB_DATABASE=$MYSQL_DATABASE|" .env || handle_error "Fai
 sed -i "s|DB_USERNAME=.*|DB_USERNAME=$MYSQL_USER|" .env || handle_error "Failed to update DB_USERNAME in .env"
 sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$MYSQL_PASSWORD|" .env || handle_error "Failed to update DB_PASSWORD in .env"
 sed -i "s|APP_URL=.*|APP_URL=https://$DOMAIN|" .env || handle_error "Failed to update APP_URL in .env"
+sed -i "s|APP_NAME=.*|APP_NAME=\"$DOMAIN\"|" .env || handle_error "Failed to update APP_NAME in .env"
 COMPLETED_STEPS+=(".env file updated with database credentials")
 
 # Configure FreeRADIUS
